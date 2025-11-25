@@ -3,8 +3,8 @@ import { AppData, Category, Flashcard, ImportItem, ViewState } from './types';
 import { ImportModal } from './components/ImportModal';
 import { FlashcardView } from './components/FlashcardView';
 import { SyncModal } from './components/SyncModal';
-import { Plus, BookOpen, ChevronRight, Layers, Trash2, Cloud } from 'lucide-react';
-import { initSupabase, syncData } from './services/syncService';
+import { Plus, BookOpen, ChevronRight, Layers, Trash2, Cloud, Loader2, CheckCircle, CloudOff } from 'lucide-react';
+import { initSupabase, syncData, pushData, isConfigured } from './services/syncService';
 
 // Simple UUID generator
 const generateId = () => Math.random().toString(36).substr(2, 9) + '-' + Date.now().toString(36);
@@ -19,36 +19,51 @@ export default function App() {
   const [isImportOpen, setIsImportOpen] = useState(false);
   const [isSyncOpen, setIsSyncOpen] = useState(false);
 
-  // Persistence Loading
+  // Sync Status
+  const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'saved' | 'error'>('idle');
+  const [isConnected, setIsConnected] = useState(false);
+
+  // Persistence Loading & Auto-Sync
   useEffect(() => {
     // 1. Load Local
     const saved = localStorage.getItem('tcf-cards-data');
+    let localData: AppData = [];
+    
     if (saved) {
       try {
-        setData(JSON.parse(saved));
+        localData = JSON.parse(saved);
+        setData(localData);
       } catch (e) {
         console.error("Failed to load local data", e);
       }
     } else {
         // Initial Demo Data
-        setData([
+        localData = [
             { id: generateId(), name: "Compréhension Orale", units: [] },
             { id: generateId(), name: "Expression Orale", units: [] },
             { id: generateId(), name: "Compréhension Écrite", units: [] },
             { id: generateId(), name: "Expression Écrite", units: [] }
-        ])
+        ];
+        setData(localData);
     }
 
-    // 2. Try background sync if creds exist
+    // 2. Init Supabase & Auto Sync
     const savedConfig = localStorage.getItem('tcf-supabase-config');
     if (savedConfig) {
       try {
         const { url, key } = JSON.parse(savedConfig);
         if (initSupabase({ url, key })) {
-             // We need current data from state, but inside useEffect we use the loaded 'saved' or initial.
-             // Best to wait for user trigger or do a silent check. 
-             // For simplicity, we won't auto-sync on mount to avoid conflicts before UI is ready,
-             // but we will allow the Sync button to work immediately.
+             setIsConnected(true);
+             // Trigger background sync on load to pull remote changes
+             setSyncStatus('syncing');
+             syncData(localData).then((result) => {
+                 if (result.success && result.data) {
+                     setData(result.data);
+                     setSyncStatus('saved');
+                 } else {
+                     setSyncStatus('idle'); // Keep idle if sync failed but config is valid
+                 }
+             });
         }
       } catch (e) {
         console.error("Auto-sync config error", e);
@@ -62,6 +77,20 @@ export default function App() {
       localStorage.setItem('tcf-cards-data', JSON.stringify(data));
     }
   }, [data]);
+
+  // Helper to trigger background cloud save
+  const triggerCloudSave = async (newData: AppData) => {
+    // Always save locally via state update effect
+    if (isConnected) {
+        setSyncStatus('syncing');
+        const result = await pushData(newData);
+        if (result.success) {
+            setSyncStatus('saved');
+        } else {
+            setSyncStatus('error');
+        }
+    }
+  };
 
   const handleImport = (items: ImportItem[]) => {
     setData((prevData) => {
@@ -90,13 +119,26 @@ export default function App() {
           mastered: false
         });
       });
+      
+      // Trigger Cloud Save
+      triggerCloudSave(newData);
+      
       return newData;
     });
   };
 
   const handleSyncComplete = (newData: AppData) => {
       setData(newData);
-      // It will auto-save to local storage via the useEffect
+      setIsConnected(true);
+      setSyncStatus('saved');
+  };
+
+  const handleDisconnect = () => {
+    localStorage.removeItem('tcf-supabase-config');
+    setIsConnected(false);
+    setSyncStatus('idle');
+    setIsSyncOpen(false);
+    // Optional: Reload page to clear any memory states if needed, but react state should handle it.
   };
 
   const handleUnitClick = (categoryId: string, unitId: string) => {
@@ -109,9 +151,15 @@ export default function App() {
       e.stopPropagation();
       if(!confirm("Are you sure you want to delete this unit and all its cards?")) return;
       
-      const newData = [...data];
-      newData[catIdx].units.splice(unitIdx, 1);
-      setData(newData);
+      setData(prevData => {
+          const newData = [...prevData];
+          newData[catIdx].units.splice(unitIdx, 1);
+          
+          // Trigger Cloud Save
+          triggerCloudSave(newData);
+          
+          return newData;
+      });
   }
 
   // --- Renders ---
@@ -127,17 +175,43 @@ export default function App() {
         </div>
         
         <div className="flex gap-3">
+            {/* Smart Status Indicator / Button */}
             <button
                 onClick={() => setIsSyncOpen(true)}
-                className="bg-slate-800 hover:bg-slate-700 text-slate-300 px-4 py-3 rounded-lg font-medium flex items-center gap-2 border border-slate-700 transition"
-                title="Cloud Sync Settings"
+                className={`
+                  px-4 py-3 rounded-lg font-medium flex items-center gap-2 border transition relative
+                  ${isConnected 
+                    ? 'bg-slate-800/50 border-slate-700 text-slate-300 hover:bg-slate-800 hover:text-white' 
+                    : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-white hover:border-slate-500'
+                  }
+                `}
+                title="Cloud Connection Settings"
             >
-                <Cloud className="w-5 h-5" />
-                <span className="hidden sm:inline">Sync</span>
+                {/* Icon Logic */}
+                {!isConnected ? (
+                   <CloudOff className="w-5 h-5" />
+                ) : syncStatus === 'syncing' ? (
+                   <Loader2 className="w-5 h-5 animate-spin text-indigo-400" />
+                ) : syncStatus === 'saved' ? (
+                   <CheckCircle className="w-5 h-5 text-green-400" />
+                ) : syncStatus === 'error' ? (
+                    <Cloud className="w-5 h-5 text-red-400" />
+                ) : (
+                    <Cloud className="w-5 h-5 text-indigo-400" />
+                )}
+
+                {/* Text Logic */}
+                <span className="hidden sm:inline text-sm">
+                   {!isConnected ? "Connect Cloud" 
+                    : syncStatus === 'syncing' ? "Saving..." 
+                    : syncStatus === 'saved' ? "Saved" 
+                    : "Cloud Active"}
+                </span>
             </button>
+
             <button 
-            onClick={() => setIsImportOpen(true)}
-            className="bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-3 rounded-lg font-medium flex items-center gap-2 shadow-lg shadow-indigo-900/20 transition transform hover:scale-105"
+              onClick={() => setIsImportOpen(true)}
+              className="bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-3 rounded-lg font-medium flex items-center gap-2 shadow-lg shadow-indigo-900/20 transition transform hover:scale-105"
             >
             <Plus className="w-5 h-5" />
             Import
@@ -184,6 +258,7 @@ export default function App() {
                         <button 
                             className="p-1 hover:text-red-400 text-slate-600 transition"
                             onClick={(e) => handleDeleteUnit(e, catIdx, unitIdx)}
+                            title="Delete Unit"
                         >
                             <Trash2 className="w-3 h-3" />
                         </button>
@@ -239,6 +314,8 @@ export default function App() {
         onClose={() => setIsSyncOpen(false)}
         currentData={data}
         onSyncComplete={handleSyncComplete}
+        isConnected={isConnected}
+        onDisconnect={handleDisconnect}
       />
     </div>
   );

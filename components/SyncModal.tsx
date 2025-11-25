@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { X, Cloud, Save, Loader2, CheckCircle, AlertCircle } from 'lucide-react';
-import { SyncConfig, initSupabase, syncData } from '../services/syncService';
+import { X, Cloud, Save, Loader2, CheckCircle, AlertCircle, RefreshCw, Unplug } from 'lucide-react';
+import { initSupabase, syncData } from '../services/syncService';
 import { AppData } from '../types';
 
 interface SyncModalProps {
@@ -8,9 +8,13 @@ interface SyncModalProps {
   onClose: () => void;
   currentData: AppData;
   onSyncComplete: (data: AppData) => void;
+  onDisconnect: () => void;
+  isConnected: boolean;
 }
 
-export const SyncModal: React.FC<SyncModalProps> = ({ isOpen, onClose, currentData, onSyncComplete }) => {
+export const SyncModal: React.FC<SyncModalProps> = ({ 
+  isOpen, onClose, currentData, onSyncComplete, onDisconnect, isConnected 
+}) => {
   const [url, setUrl] = useState('');
   const [key, setKey] = useState('');
   const [status, setStatus] = useState<'idle' | 'connecting' | 'syncing' | 'success' | 'error'>('idle');
@@ -29,14 +33,14 @@ export const SyncModal: React.FC<SyncModalProps> = ({ isOpen, onClose, currentDa
 
   if (!isOpen) return null;
 
-  const handleConnectAndSync = async () => {
+  const handleConnect = async (isForceSync = false) => {
     if (!url || !key) {
       setStatus('error');
       setMessage("Please enter both URL and API Key.");
       return;
     }
 
-    setStatus('connecting');
+    setStatus(isForceSync ? 'syncing' : 'connecting');
     const initialized = initSupabase({ url, key });
     
     if (!initialized) {
@@ -48,20 +52,21 @@ export const SyncModal: React.FC<SyncModalProps> = ({ isOpen, onClose, currentDa
     // Save credentials
     localStorage.setItem('tcf-supabase-config', JSON.stringify({ url, key }));
 
+    // Perform an immediate sync to ensure data is consistent
     setStatus('syncing');
     const result = await syncData(currentData);
 
     if (result.success && result.data) {
       setStatus('success');
-      setMessage("Sync complete! Cloud and Local are now in sync.");
+      setMessage(isForceSync ? "Resync complete! Data merged." : "Connected successfully.");
       onSyncComplete(result.data);
       setTimeout(() => {
-          onClose();
+          if (!isForceSync) onClose();
           setStatus('idle');
       }, 1500);
     } else {
       setStatus('error');
-      setMessage(result.error || "Sync failed. Check your table permissions.");
+      setMessage(result.error || "Connection failed. Check permissions.");
     }
   };
 
@@ -71,7 +76,7 @@ export const SyncModal: React.FC<SyncModalProps> = ({ isOpen, onClose, currentDa
         <div className="p-6 border-b border-slate-700 flex justify-between items-center bg-slate-800">
           <h2 className="text-xl font-bold text-white flex items-center gap-2">
             <Cloud className="w-5 h-5 text-indigo-400" />
-            Cloud Sync Settings
+            Cloud Connection
           </h2>
           <button onClick={onClose} className="text-slate-400 hover:text-white transition">
             <X className="w-5 h-5" />
@@ -79,35 +84,51 @@ export const SyncModal: React.FC<SyncModalProps> = ({ isOpen, onClose, currentDa
         </div>
 
         <div className="p-6 space-y-4">
-          <div className="bg-indigo-900/20 border border-indigo-500/30 p-3 rounded-lg text-xs text-indigo-200">
-            <p className="font-bold mb-1">How to set up:</p>
-            <ol className="list-decimal list-inside space-y-1 opacity-90">
-                <li>Create a free project at <b>supabase.com</b></li>
-                <li>Create a table named <code>tcf_sync</code> with columns: <code>id</code> (int8, PK), <code>content</code> (jsonb).</li>
-                <li>Insert a row: <code>id: 1</code>, <code>content: []</code></li>
-            </ol>
-          </div>
+          {isConnected && (
+            <div className="bg-green-900/20 border border-green-500/30 p-3 rounded-lg flex items-center gap-3">
+               <div className="p-2 bg-green-500/20 rounded-full">
+                  <CheckCircle className="w-5 h-5 text-green-400" />
+               </div>
+               <div>
+                 <p className="text-green-300 font-bold text-sm">System Connected</p>
+                 <p className="text-green-400/70 text-xs">Sync is active and automatic.</p>
+               </div>
+            </div>
+          )}
 
-          <div>
-            <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Project URL</label>
-            <input 
-              type="text" 
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-              placeholder="https://xyz.supabase.co"
-              className="w-full bg-slate-900 border border-slate-700 text-white p-2 rounded focus:ring-2 focus:ring-indigo-500 text-sm"
-            />
-          </div>
-          
-          <div>
-            <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Anon Public Key</label>
-            <input 
-              type="password" 
-              value={key}
-              onChange={(e) => setKey(e.target.value)}
-              placeholder="eyJhbGciOiJIUzI1NiIsInR5c..."
-              className="w-full bg-slate-900 border border-slate-700 text-white p-2 rounded focus:ring-2 focus:ring-indigo-500 text-sm"
-            />
+          {!isConnected && (
+            <div className="bg-indigo-900/20 border border-indigo-500/30 p-3 rounded-lg text-xs text-indigo-200">
+              <p className="font-bold mb-1">Setup Supabase (Free):</p>
+              <ol className="list-decimal list-inside space-y-1 opacity-90">
+                  <li>Create project at <b>supabase.com</b></li>
+                  <li>Run SQL: <code>create table tcf_sync (id int8 primary key, content jsonb, updated_at timestamptz);</code></li>
+                  <li>Run SQL: <code>insert into tcf_sync (id, content) values (1, '[]');</code></li>
+              </ol>
+            </div>
+          )}
+
+          <div className="space-y-3">
+            <div>
+              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Project URL</label>
+              <input 
+                type="text" 
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+                placeholder="https://xyz.supabase.co"
+                className="w-full bg-slate-900 border border-slate-700 text-white p-2.5 rounded-lg focus:ring-2 focus:ring-indigo-500 text-sm font-mono"
+              />
+            </div>
+            
+            <div>
+              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Anon Public Key</label>
+              <input 
+                type="password" 
+                value={key}
+                onChange={(e) => setKey(e.target.value)}
+                placeholder="eyJhbGciOiJIUzI1NiIsInR5c..."
+                className="w-full bg-slate-900 border border-slate-700 text-white p-2.5 rounded-lg focus:ring-2 focus:ring-indigo-500 text-sm font-mono"
+              />
+            </div>
           </div>
 
           {status === 'error' && (
@@ -124,18 +145,40 @@ export const SyncModal: React.FC<SyncModalProps> = ({ isOpen, onClose, currentDa
           )}
         </div>
 
-        <div className="p-4 bg-slate-900/50 flex justify-end">
+        <div className="p-4 bg-slate-900/50 flex justify-between items-center">
+           {isConnected ? (
+             <div className="flex gap-2">
+                <button
+                  onClick={onDisconnect}
+                  className="px-3 py-2 text-red-400 hover:bg-red-900/20 rounded-lg text-sm font-medium transition flex items-center gap-2"
+                >
+                  <Unplug className="w-4 h-4" />
+                  Disconnect
+                </button>
+                 <button
+                  onClick={() => handleConnect(true)}
+                  className="px-3 py-2 text-slate-300 hover:bg-slate-800 rounded-lg text-sm font-medium transition flex items-center gap-2"
+                  title="Manually pull data from cloud"
+                >
+                  <RefreshCw className={`w-4 h-4 ${status === 'syncing' ? 'animate-spin' : ''}`} />
+                  Force Resync
+                </button>
+             </div>
+           ) : (
+             <div></div>
+           )}
+
           <button
-            onClick={handleConnectAndSync}
+            onClick={() => handleConnect(false)}
             disabled={status === 'connecting' || status === 'syncing'}
-            className="flex items-center gap-2 px-6 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-lg font-medium transition"
+            className="flex items-center gap-2 px-6 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-lg font-medium transition shadow-lg shadow-indigo-900/20"
           >
             {(status === 'connecting' || status === 'syncing') ? (
                <Loader2 className="w-4 h-4 animate-spin" />
             ) : (
                <Save className="w-4 h-4" />
             )}
-            {status === 'connecting' ? 'Connecting...' : status === 'syncing' ? 'Syncing...' : 'Connect & Sync'}
+            {isConnected ? 'Update Settings' : 'Connect & Sync'}
           </button>
         </div>
       </div>
