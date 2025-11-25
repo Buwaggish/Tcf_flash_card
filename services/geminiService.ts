@@ -1,7 +1,7 @@
 import { GoogleGenAI, Modality } from "@google/genai";
 
 // Initialize Gemini Client
-const ai = new GoogleGenAI({ apiKey: '' });
+const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 // Helper to decode Base64 to ArrayBuffer for audio context
 function decode(base64: string): Uint8Array {
