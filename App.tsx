@@ -4,7 +4,7 @@ import { ImportModal } from './components/ImportModal';
 import { FlashcardView } from './components/FlashcardView';
 import { SyncModal } from './components/SyncModal';
 import { Plus, BookOpen, ChevronRight, Layers, Trash2, Cloud, Loader2, CheckCircle, CloudOff } from 'lucide-react';
-import { initSupabase, syncData, pushData, isConfigured } from './services/syncService';
+import { initSupabase, syncData, pushData, isConfigured, consolidateData } from './services/syncService';
 
 // Simple UUID generator
 const generateId = () => Math.random().toString(36).substr(2, 9) + '-' + Date.now().toString(36);
@@ -139,6 +139,17 @@ export default function App() {
     setSyncStatus('idle');
     setIsSyncOpen(false);
     // Optional: Reload page to clear any memory states if needed, but react state should handle it.
+  };
+
+  const handleFixDuplicates = async () => {
+    if(!confirm("This will merge categories and units with the same name and remove duplicate cards. The result will be saved to your cloud. Continue?")) return;
+    
+    setData(prev => {
+      const cleaned = consolidateData(prev);
+      triggerCloudSave(cleaned); // Save to cloud immediately
+      return cleaned;
+    });
+    alert("Duplicates fixed! Data has been cleaned.");
   };
 
   const handleUnitClick = (categoryId: string, unitId: string) => {
@@ -316,6 +327,7 @@ export default function App() {
         onSyncComplete={handleSyncComplete}
         isConnected={isConnected}
         onDisconnect={handleDisconnect}
+        onFixDuplicates={handleFixDuplicates}
       />
     </div>
   );

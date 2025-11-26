@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Cloud, Save, Loader2, CheckCircle, AlertCircle, RefreshCw, Unplug } from 'lucide-react';
+import { X, Cloud, Save, Loader2, CheckCircle, AlertCircle, RefreshCw, Unplug, Wrench } from 'lucide-react';
 import { initSupabase, syncData } from '../services/syncService';
 import { AppData } from '../types';
 
@@ -9,11 +9,12 @@ interface SyncModalProps {
   currentData: AppData;
   onSyncComplete: (data: AppData) => void;
   onDisconnect: () => void;
+  onFixDuplicates: () => void;
   isConnected: boolean;
 }
 
 export const SyncModal: React.FC<SyncModalProps> = ({ 
-  isOpen, onClose, currentData, onSyncComplete, onDisconnect, isConnected 
+  isOpen, onClose, currentData, onSyncComplete, onDisconnect, onFixDuplicates, isConnected 
 }) => {
   const [url, setUrl] = useState('');
   const [key, setKey] = useState('');
@@ -131,6 +132,24 @@ export const SyncModal: React.FC<SyncModalProps> = ({
             </div>
           </div>
 
+          {/* Maintenance Section */}
+          <div className="border-t border-slate-700 pt-3">
+             <div className="flex items-center gap-2 mb-2">
+                <Wrench className="w-3 h-3 text-orange-400" />
+                <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Maintenance</span>
+             </div>
+             <button
+               onClick={onFixDuplicates}
+               className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-lg text-sm transition"
+             >
+               <RefreshCw className="w-4 h-4" />
+               Fix Duplicates & Clean Data
+             </button>
+             <p className="text-[10px] text-slate-500 mt-1 text-center">
+               Merges duplicate categories/units and removes identical cards.
+             </p>
+          </div>
+
           {status === 'error' && (
             <div className="flex items-center gap-2 text-red-400 text-sm bg-red-900/20 p-2 rounded">
               <AlertCircle className="w-4 h-4" />
@@ -184,4 +203,4 @@ export const SyncModal: React.FC<SyncModalProps> = ({
       </div>
     </div>
   );
-};
+}

@@ -151,4 +151,59 @@ export const pushData = async (data: AppData): Promise<{ success: boolean; error
     console.error("Push Error:", err);
     return { success: false, error: err.message };
   }
-}
+};
+
+/**
+ * Deep Cleaning Function
+ * Merges categories with same name, units with same name, and removes identical cards.
+ */
+export const consolidateData = (data: AppData): AppData => {
+  const categoriesMap = new Map<string, Category>();
+
+  data.forEach(cat => {
+    const key = cat.name.trim().toLowerCase();
+    if (!categoriesMap.has(key)) {
+      // Clone to avoid mutation issues
+      categoriesMap.set(key, { ...cat, units: [...cat.units] });
+    } else {
+      // Merge units
+      const existing = categoriesMap.get(key)!;
+      existing.units.push(...cat.units);
+    }
+  });
+
+  const cleanedCategories: Category[] = Array.from(categoriesMap.values()).map(cat => {
+    // Deduplicate Units within Category
+    const unitsMap = new Map<string, Unit>();
+    
+    cat.units.forEach(unit => {
+      const key = unit.name.trim().toLowerCase();
+      if (!unitsMap.has(key)) {
+        unitsMap.set(key, { ...unit, cards: [...unit.cards] });
+      } else {
+        const existing = unitsMap.get(key)!;
+        existing.cards.push(...unit.cards);
+      }
+    });
+
+    const cleanedUnits: Unit[] = Array.from(unitsMap.values()).map(unit => {
+      // Deduplicate Cards within Unit
+      const uniqueCards: Flashcard[] = [];
+      const seenCards = new Set<string>();
+
+      unit.cards.forEach(card => {
+        const contentKey = `${card.front.trim()}|${card.back.trim()}`;
+        if (!seenCards.has(contentKey)) {
+          seenCards.add(contentKey);
+          uniqueCards.push(card);
+        }
+      });
+
+      return { ...unit, cards: uniqueCards };
+    });
+
+    return { ...cat, units: cleanedUnits };
+  });
+
+  return cleanedCategories;
+};
