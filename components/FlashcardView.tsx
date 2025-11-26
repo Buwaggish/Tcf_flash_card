@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Flashcard } from '../types';
 import { getFrenchVoices, speak, cancelSpeech } from '../services/ttsService';
-import { ArrowLeft, RefreshCw, Volume2, Play, Settings } from 'lucide-react';
+import { playAzureTTS } from '../services/azureService';
+import { ArrowLeft, RefreshCw, Volume2, Play, Settings, CloudLightning, Save } from 'lucide-react';
 
 interface FlashcardViewProps {
   cards: Flashcard[];
@@ -11,15 +12,15 @@ interface FlashcardViewProps {
 }
 
 export const FlashcardView: React.FC<FlashcardViewProps> = ({ cards, title, onBack, unitId }) => {
-  // Storage Key for persistence
   const storageKey = `tcf-progress-${unitId}`;
+  
+  // Audio Context Ref for Azure
+  const audioContextRef = useRef<AudioContext | null>(null);
 
-  // Initialize state from storage
   const [currentIndex, setCurrentIndex] = useState(() => {
     try {
       const saved = localStorage.getItem(storageKey);
       const parsed = saved ? parseInt(saved, 10) : 0;
-      // Ensure saved index is within valid bounds
       return (parsed >= 0 && parsed < cards.length) ? parsed : 0;
     } catch {
       return 0;
@@ -34,38 +35,43 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ cards, title, onBa
   const [selectedVoiceName, setSelectedVoiceName] = useState<string>('');
   const [showVoiceSettings, setShowVoiceSettings] = useState(false);
 
+  // Azure State
+  const [azureRegion, setAzureRegion] = useState(() => localStorage.getItem('tcf-azure-region') || '');
+  const [azureKey, setAzureKey] = useState(() => localStorage.getItem('tcf-azure-key') || '');
+  const [showAzureSettings, setShowAzureSettings] = useState(false);
+
   const currentCard = cards[currentIndex];
   const isFrenchLong = currentCard.back.split(' ').length > 4;
 
-  // Persist progress whenever index changes
   useEffect(() => {
     localStorage.setItem(storageKey, currentIndex.toString());
   }, [currentIndex, storageKey]);
 
-  // Load voices on mount
   useEffect(() => {
     const loadVoices = () => {
       const available = getFrenchVoices();
       setVoices(available);
-      
-      // recover saved voice preference
       const savedVoice = localStorage.getItem('tcf-tts-voice');
       if (savedVoice && available.some(v => v.name === savedVoice)) {
         setSelectedVoiceName(savedVoice);
       } else if (available.length > 0) {
-        // Default to first available if nothing saved
         setSelectedVoiceName(available[0].name);
       }
     };
-
     loadVoices();
-    
-    // Chrome loads voices asynchronously
     window.speechSynthesis.onvoiceschanged = loadVoices;
+    
+    // Init AudioContext for Azure
+    if (!audioContextRef.current) {
+        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+    }
 
     return () => {
       window.speechSynthesis.onvoiceschanged = null;
-      cancelSpeech(); // Cleanup any ongoing speech
+      cancelSpeech();
+      if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+          audioContextRef.current.close();
+      }
     };
   }, []);
 
@@ -75,15 +81,20 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ cards, title, onBa
     localStorage.setItem('tcf-tts-voice', name);
   };
 
+  const handleAzureSave = () => {
+      localStorage.setItem('tcf-azure-region', azureRegion);
+      localStorage.setItem('tcf-azure-key', azureKey);
+      setShowAzureSettings(false);
+      alert("Azure settings saved.");
+  };
+
   const getSelectedVoice = useCallback(() => {
     return voices.find(v => v.name === selectedVoiceName) || null;
   }, [voices, selectedVoiceName]);
 
-  // Play normal speed
   const handlePlayAudio = useCallback(async (e?: React.MouseEvent) => {
     e?.stopPropagation();
     if (isPlaying) return;
-
     try {
       setIsPlaying(true);
       cancelSpeech();
@@ -95,7 +106,33 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ cards, title, onBa
     }
   }, [isPlaying, currentCard.back, getSelectedVoice]);
 
-  // Play word-by-word if long
+  const handleCloudPlay = useCallback(async (e?: React.MouseEvent) => {
+      e?.stopPropagation();
+      if (isPlaying) return;
+      
+      if (!azureRegion || !azureKey) {
+          setShowAzureSettings(true);
+          setShowVoiceSettings(true); // Expand settings panel
+          return;
+      }
+
+      try {
+          setIsPlaying(true);
+          cancelSpeech(); // Stop browser TTS
+          if (audioContextRef.current?.state === 'suspended') {
+              await audioContextRef.current.resume();
+          }
+          if (audioContextRef.current) {
+             await playAzureTTS(currentCard.back, azureRegion, azureKey, audioContextRef.current);
+          }
+      } catch (err) {
+          console.error("Cloud playback error", err);
+          alert("Azure TTS failed. Check Console or Keys.");
+      } finally {
+          setIsPlaying(false);
+      }
+  }, [isPlaying, currentCard.back, azureRegion, azureKey]);
+
   const handlePlaySequence = async (e?: React.MouseEvent) => {
     e?.stopPropagation();
     if (isPlaying) return;
@@ -106,12 +143,10 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ cards, title, onBa
     try {
       setIsPlaying(true);
       cancelSpeech();
-
       for (const word of words) {
-        await speak(word, voice, 0.9); // Slightly slower rate for clarity
+        await speak(word, voice, 0.9);
         await new Promise(r => setTimeout(r, 200)); 
       }
-
     } catch (err) {
       console.error("Sequence playback error", err);
     } finally {
@@ -135,10 +170,9 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ cards, title, onBa
     }, 200);
   }, [cards.length]);
 
-  // Keyboard navigation
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement) return;
 
       if (e.key === ' ' || e.key === 'Enter') {
         setIsFlipped((p) => !p);
@@ -148,22 +182,23 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ cards, title, onBa
         prevCard();
       } else if (e.key.toLowerCase() === 'p') {
         handlePlayAudio();
+      } else if (e.key.toLowerCase() === 'o') {
+        handleCloudPlay();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [nextCard, prevCard, handlePlayAudio]);
+  }, [nextCard, prevCard, handlePlayAudio, handleCloudPlay]);
 
   return (
     <div className="flex flex-col h-full max-w-4xl mx-auto w-full p-4 relative">
-      {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <button 
           onClick={() => { cancelSpeech(); onBack(); }}
           className="flex items-center gap-2 text-slate-400 hover:text-white transition"
         >
           <ArrowLeft className="w-5 h-5" />
-          <span>Back to Deck</span>
+          <span>Back</span>
         </button>
         
         <div className="flex items-center gap-4">
@@ -173,18 +208,18 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ cards, title, onBa
           <button 
             onClick={() => setShowVoiceSettings(!showVoiceSettings)}
             className={`p-2 rounded-lg transition ${showVoiceSettings ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}
-            title="Voice Settings"
+            title="Audio Settings"
           >
             <Settings className="w-5 h-5" />
           </button>
         </div>
       </div>
 
-      {/* Voice Selection Panel */}
       {showVoiceSettings && (
-        <div className="mb-6 p-4 bg-slate-800 rounded-xl border border-slate-700 animate-in fade-in slide-in-from-top-2">
+        <div className="mb-6 space-y-4 bg-slate-800 rounded-xl border border-slate-700 p-4 animate-in fade-in slide-in-from-top-2">
+          {/* Browser Voice */}
           <div className="flex flex-col gap-2">
-            <label className="text-xs font-bold text-slate-400 uppercase tracking-widest">Select Pronunciation Voice</label>
+            <label className="text-xs font-bold text-slate-400 uppercase tracking-widest">Local Voice</label>
             <div className="flex gap-2">
                 <select 
                     value={selectedVoiceName} 
@@ -193,21 +228,47 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ cards, title, onBa
                 >
                     {voices.length === 0 && <option value="">Loading voices...</option>}
                     {voices.map((v) => (
-                    <option key={v.name} value={v.name}>
-                        {v.name} ({v.lang})
-                    </option>
+                    <option key={v.name} value={v.name}>{v.name} ({v.lang})</option>
                     ))}
                 </select>
-                <button 
-                    onClick={handlePlayAudio}
-                    className="px-3 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm"
-                >
-                    Test
-                </button>
+                <button onClick={handlePlayAudio} className="px-3 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg text-sm">Test</button>
             </div>
-            <p className="text-xs text-slate-500 mt-1">
-                * Note: Voices provided by your browser. "Google Français" or standard system voices are recommended.
-            </p>
+          </div>
+
+          <div className="border-t border-slate-700 pt-4">
+             <div className="flex items-center justify-between mb-2">
+                 <label className="text-xs font-bold text-indigo-400 uppercase tracking-widest flex items-center gap-2">
+                    <CloudLightning className="w-3 h-3" />
+                    Azure Cloud Voice
+                 </label>
+                 <button onClick={() => setShowAzureSettings(!showAzureSettings)} className="text-xs text-slate-400 hover:text-white underline">
+                     {showAzureSettings ? 'Hide Config' : 'Configure'}
+                 </button>
+             </div>
+             
+             {showAzureSettings && (
+                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-2 p-3 bg-slate-900/50 rounded-lg">
+                    <input 
+                        placeholder="Region (e.g. eastus)" 
+                        value={azureRegion}
+                        onChange={(e) => setAzureRegion(e.target.value)}
+                        className="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-white"
+                    />
+                    <input 
+                        type="password"
+                        placeholder="API Key" 
+                        value={azureKey}
+                        onChange={(e) => setAzureKey(e.target.value)}
+                        className="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-white"
+                    />
+                    <button onClick={handleAzureSave} className="md:col-span-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs py-1 rounded flex items-center justify-center gap-1">
+                        <Save className="w-3 h-3" /> Save Azure Settings
+                    </button>
+                 </div>
+             )}
+             <p className="text-xs text-slate-500">
+                Requires an Azure Speech Key. Press 'O' to play using high-quality Neural voice.
+             </p>
           </div>
         </div>
       )}
@@ -216,57 +277,59 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ cards, title, onBa
         <h2 className="text-xl font-bold text-white">{title}</h2>
       </div>
 
-      {/* Card Area */}
-      <div className="flex-1 flex items-center justify-center min-h-[400px] perspective-1000">
+      <div className="flex-1 flex items-center justify-center min-h-[50vh] perspective-1000 mb-8">
         <div 
-          className={`relative w-full max-w-lg aspect-[4/3] transition-all duration-500 transform-style-3d cursor-pointer group ${isFlipped ? 'rotate-y-180' : ''}`}
+          className={`relative w-full max-w-lg transition-all duration-500 transform-style-3d cursor-pointer group 
+            h-[50vh] md:h-auto md:aspect-[4/3]
+            ${isFlipped ? 'rotate-y-180' : ''}`}
           onClick={() => setIsFlipped(!isFlipped)}
         >
           {/* Front */}
           <div className="absolute inset-0 backface-hidden bg-slate-800 border-2 border-slate-700 rounded-2xl shadow-2xl flex flex-col items-center justify-center p-8 group-hover:border-indigo-500/50 transition">
             <span className="text-xs font-bold text-indigo-400 uppercase tracking-widest mb-4">Question</span>
-            <p className="text-3xl text-center font-medium text-slate-100 leading-relaxed">
+            <p className="text-2xl md:text-3xl text-center font-medium text-slate-100 leading-relaxed overflow-y-auto max-h-[70%]">
               {currentCard.front}
             </p>
-            <p className="mt-8 text-sm text-slate-500 animate-pulse">Tap to flip</p>
+            <p className="mt-auto md:mt-8 text-sm text-slate-500 animate-pulse pt-4">Tap to flip</p>
           </div>
 
           {/* Back */}
           <div className="absolute inset-0 backface-hidden rotate-y-180 bg-indigo-900/20 border-2 border-indigo-500/30 rounded-2xl shadow-2xl flex flex-col items-center justify-center p-8 backdrop-blur-sm">
              <span className="text-xs font-bold text-indigo-400 uppercase tracking-widest mb-4">Réponse</span>
-            <p className="text-3xl text-center font-medium text-white leading-relaxed">
+            <p className="text-2xl md:text-3xl text-center font-medium text-white leading-relaxed overflow-y-auto max-h-[60%] mb-4">
               {currentCard.back}
             </p>
             
-            {/* Audio Controls - Sticky inside card */}
-            <div className="mt-8 flex gap-3" onClick={(e) => e.stopPropagation()}>
+            <div className="mt-auto flex flex-wrap justify-center gap-3 pt-4 border-t border-white/10 w-full" onClick={(e) => e.stopPropagation()}>
               <button
                 onClick={handlePlayAudio}
                 disabled={isPlaying}
-                title="Play (P)"
-                className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed rounded-full text-white shadow-lg transition"
+                title="Play Local (P)"
+                className="flex items-center gap-2 px-3 py-2 md:px-4 md:py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 rounded-full text-white shadow-lg transition text-sm md:text-base"
               >
-                {isPlaying && !isFrenchLong ? (
-                   <RefreshCw className="w-4 h-4 animate-spin" />
-                ) : (
-                  <Volume2 className="w-4 h-4" />
-                )}
-                <span>Play</span>
+                {isPlaying && !isFrenchLong ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Volume2 className="w-4 h-4" />}
+                <span>Local</span>
+              </button>
+
+              <button
+                onClick={handleCloudPlay}
+                disabled={isPlaying || !azureKey}
+                title="Play Cloud (O)"
+                className={`flex items-center gap-2 px-3 py-2 md:px-4 md:py-2 rounded-full shadow-lg transition text-sm md:text-base ${azureKey ? 'bg-cyan-600 hover:bg-cyan-500 text-white' : 'bg-slate-700 text-slate-400 cursor-not-allowed'}`}
+              >
+                {isPlaying ? <RefreshCw className="w-4 h-4 animate-spin" /> : <CloudLightning className="w-4 h-4" />}
+                <span>Cloud</span>
               </button>
 
               {isFrenchLong && (
                 <button
                   onClick={handlePlaySequence}
                   disabled={isPlaying}
-                  className="flex items-center gap-2 px-4 py-2 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed rounded-full text-white shadow-lg transition"
+                  className="flex items-center gap-2 px-3 py-2 md:px-4 md:py-2 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 rounded-full text-white shadow-lg transition text-sm md:text-base"
                   title="Read word by word"
                 >
-                   {isPlaying ? (
-                     <RefreshCw className="w-4 h-4 animate-spin" />
-                   ) : (
-                     <Play className="w-4 h-4" />
-                   )}
-                  <span className="text-xs">Word-by-Word</span>
+                   <Play className="w-4 h-4" />
+                   <span className="hidden md:inline">Slow</span>
                 </button>
               )}
             </div>
@@ -274,27 +337,21 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ cards, title, onBa
         </div>
       </div>
 
-      {/* Footer Controls */}
-      <div className="mt-8 flex justify-center gap-6">
+      <div className="mt-auto flex justify-center gap-6 pb-6">
         <button 
           onClick={prevCard}
-          title="Previous (Left Arrow)"
           className="p-4 rounded-full bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white transition"
         >
           <ArrowLeft className="w-6 h-6" />
         </button>
         <button 
-          onClick={() => {
-              setIsFlipped(!isFlipped);
-          }}
-          title="Flip (Space/Enter)"
+          onClick={() => setIsFlipped(!isFlipped)}
           className="p-4 rounded-full bg-indigo-600/20 text-indigo-400 hover:bg-indigo-600/40 hover:text-white transition border border-indigo-500/30"
         >
           <RefreshCw className="w-6 h-6" />
         </button>
         <button 
           onClick={nextCard}
-          title="Next (Right Arrow)"
           className="p-4 rounded-full bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white transition"
         >
           <ArrowRightIcon />
@@ -305,17 +362,7 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ cards, title, onBa
 };
 
 const ArrowRightIcon = () => (
-  <svg 
-    xmlns="http://www.w3.org/2000/svg" 
-    width="24" 
-    height="24" 
-    viewBox="0 0 24 24" 
-    fill="none" 
-    stroke="currentColor" 
-    strokeWidth="2" 
-    strokeLinecap="round" 
-    strokeLinejoin="round" 
-  >
+  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M5 12h14" />
     <path d="m12 5 7 7-7 7" />
   </svg>
