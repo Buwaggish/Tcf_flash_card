@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Flashcard } from '../types';
 import { getFrenchVoices, speak, cancelSpeech } from '../services/ttsService';
 import { playAzureTTS } from '../services/azureService';
@@ -14,9 +14,6 @@ interface FlashcardViewProps {
 export const FlashcardView: React.FC<FlashcardViewProps> = ({ cards, title, onBack, unitId }) => {
   const storageKey = `tcf-progress-${unitId}`;
   
-  // Audio Context Ref for Azure
-  const audioContextRef = useRef<AudioContext | null>(null);
-
   const [currentIndex, setCurrentIndex] = useState(() => {
     try {
       const saved = localStorage.getItem(storageKey);
@@ -61,17 +58,9 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ cards, title, onBa
     loadVoices();
     window.speechSynthesis.onvoiceschanged = loadVoices;
     
-    // Init AudioContext for Azure
-    if (!audioContextRef.current) {
-        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
-    }
-
     return () => {
       window.speechSynthesis.onvoiceschanged = null;
       cancelSpeech();
-      if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
-          audioContextRef.current.close();
-      }
     };
   }, []);
 
@@ -119,12 +108,7 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ cards, title, onBa
       try {
           setIsPlaying(true);
           cancelSpeech(); // Stop browser TTS
-          if (audioContextRef.current?.state === 'suspended') {
-              await audioContextRef.current.resume();
-          }
-          if (audioContextRef.current) {
-             await playAzureTTS(currentCard.back, azureRegion, azureKey, audioContextRef.current);
-          }
+          await playAzureTTS(currentCard.back, azureRegion, azureKey);
       } catch (err) {
           console.error("Cloud playback error", err);
           alert("Azure TTS failed. Check Console or Keys.");

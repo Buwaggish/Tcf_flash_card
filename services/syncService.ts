@@ -25,6 +25,32 @@ export const initSupabase = (config: SyncConfig) => {
 export const isConfigured = () => !!supabase;
 
 /**
+ * Gets the total card count from an AppData object
+ */
+export const getCardCount = (data: AppData): number => {
+  return data.reduce((acc, cat) => acc + cat.units.reduce((uAcc, unit) => uAcc + unit.cards.length, 0), 0);
+};
+
+/**
+ * Peek at the cloud data to get its card count without full sync implications
+ */
+export const fetchCloudCount = async (): Promise<number | null> => {
+    if (!supabase) return null;
+    try {
+        const { data, error } = await supabase
+            .from(TABLE_NAME)
+            .select('content')
+            .eq('id', ROW_ID)
+            .single();
+        
+        if (error || !data) return null;
+        return getCardCount(data.content as AppData);
+    } catch (e) {
+        return null;
+    }
+};
+
+/**
  * Merges two datasets. 
  * Strategy: Union of Categories (by ID or Name), Units (by ID or Name), and Cards (by ID or Content).
  */
@@ -35,8 +61,7 @@ const mergeData = (local: AppData, remote: AppData): AppData => {
     // 1. Match Category by ID first
     let localCatIndex = merged.findIndex(c => c.id === remoteCat.id);
     
-    // 2. If ID mismatch, fallback to Name matching (case-insensitive)
-    // This prevents duplicate "Compréhension Orale" when connecting a new device
+    // 2. If ID mismatch, fallback to Name matching (case-insensitive & trimmed)
     if (localCatIndex === -1) {
         localCatIndex = merged.findIndex(c => c.name.trim().toLowerCase() === remoteCat.name.trim().toLowerCase());
     }
@@ -72,9 +97,10 @@ const mergeData = (local: AppData, remote: AppData): AppData => {
             
             if (!existsById) {
                  // 6. Secondary check: Avoid duplicate content (Same Front & Back)
-                 // This prevents duplicates if the same JSON was imported on two devices separately
+                 // Trim strings to avoid whitespace mismatches causing duplicates or missed merges
                  const existsByContent = mergedCards.some(c => 
-                     c.front === remoteCard.front && c.back === remoteCard.back
+                     c.front.trim() === remoteCard.front.trim() && 
+                     c.back.trim() === remoteCard.back.trim()
                  );
 
                  if (!existsByContent) {
@@ -94,7 +120,7 @@ const mergeData = (local: AppData, remote: AppData): AppData => {
   return merged;
 };
 
-// Pulls remote, merges with local, and updates remote. Used on App Start.
+// Pulls remote, merges with local, and updates remote. Used on App Start or Force Sync.
 export const syncData = async (localData: AppData): Promise<{ success: boolean; data?: AppData; error?: string }> => {
   if (!supabase) return { success: false, error: "Not connected" };
 
@@ -136,7 +162,7 @@ export const syncData = async (localData: AppData): Promise<{ success: boolean; 
   }
 };
 
-// Simply pushes the current local state to the cloud. Used when user edits data (Import/Delete).
+// Simply pushes the current local state to the cloud. Used when user edits data (Import/Delete) or forces a push.
 export const pushData = async (data: AppData): Promise<{ success: boolean; error?: string }> => {
   if (!supabase) return { success: false, error: "Not connected" };
   

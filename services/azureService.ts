@@ -1,8 +1,7 @@
 export const playAzureTTS = async (
   text: string,
   region: string,
-  key: string,
-  audioContext: AudioContext
+  key: string
 ): Promise<void> => {
   if (!region || !key) {
     throw new Error("Azure configuration missing");
@@ -36,17 +35,28 @@ export const playAzureTTS = async (
         throw new Error(`Azure Error: ${response.status} - ${errText}`);
     }
 
-    const arrayBuffer = await response.arrayBuffer();
-    const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+    const blob = await response.blob();
+    const audioUrl = URL.createObjectURL(blob);
+    const audio = new Audio(audioUrl);
 
-    // Play Audio
-    const source = audioContext.createBufferSource();
-    source.buffer = audioBuffer;
-    source.connect(audioContext.destination);
-    source.start(0);
-
-    return new Promise((resolve) => {
-        source.onended = () => resolve();
+    return new Promise((resolve, reject) => {
+        audio.onended = () => {
+            URL.revokeObjectURL(audioUrl);
+            resolve();
+        };
+        audio.onerror = (e) => {
+            URL.revokeObjectURL(audioUrl);
+            reject(new Error("Audio playback failed"));
+        };
+        
+        // Attempt to play
+        const playPromise = audio.play();
+        if (playPromise !== undefined) {
+            playPromise.catch(error => {
+                URL.revokeObjectURL(audioUrl);
+                reject(error);
+            });
+        }
     });
 
   } catch (error) {

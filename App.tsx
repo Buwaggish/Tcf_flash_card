@@ -98,14 +98,14 @@ export default function App() {
 
       items.forEach((item) => {
         // 1. Find or Create Category
-        let category = newData.find(c => c.name.toLowerCase() === item.category.toLowerCase());
+        let category = newData.find(c => c.name.trim().toLowerCase() === item.category.trim().toLowerCase());
         if (!category) {
           category = { id: generateId(), name: item.category, units: [] };
           newData.push(category);
         }
 
         // 2. Find or Create Unit
-        let unit = category.units.find(u => u.name.toLowerCase() === item.unit.toLowerCase());
+        let unit = category.units.find(u => u.name.trim().toLowerCase() === item.unit.trim().toLowerCase());
         if (!unit) {
           unit = { id: generateId(), name: item.unit, cards: [] };
           category.units.push(unit);
@@ -138,7 +138,6 @@ export default function App() {
     setIsConnected(false);
     setSyncStatus('idle');
     setIsSyncOpen(false);
-    // Optional: Reload page to clear any memory states if needed, but react state should handle it.
   };
 
   const handleFixDuplicates = async () => {
