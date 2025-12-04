@@ -37,5 +37,6 @@ export interface ImportItem {
 export enum ViewState {
   HOME = 'HOME',
   CATEGORY = 'CATEGORY',
-  STUDY = 'STUDY'
+  STUDY = 'STUDY',
+  STUDY_ALL = 'STUDY_ALL'
 }

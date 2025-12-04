@@ -3,7 +3,7 @@ import { AppData, Category, Flashcard, ImportItem, ViewState } from './types';
 import { ImportModal } from './components/ImportModal';
 import { FlashcardView } from './components/FlashcardView';
 import { SyncModal } from './components/SyncModal';
-import { Plus, BookOpen, ChevronRight, Layers, Trash2, Cloud, Loader2, CheckCircle, CloudOff, Brain, Download, Bell, BellOff, Flame } from 'lucide-react';
+import { Plus, BookOpen, ChevronRight, Layers, Trash2, Cloud, Loader2, CheckCircle, CloudOff, Brain, Download, Bell, BellOff, Flame, Play } from 'lucide-react';
 import { initSupabase, syncData, pushData, consolidateData } from './services/syncService';
 import { isCardDue } from './services/srsService';
 
@@ -341,157 +341,226 @@ export default function App() {
 
   // --- Renders ---
 
-  const renderHome = () => (
-    <div className="max-w-5xl mx-auto w-full p-6">
-      <header className="mb-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-indigo-400 to-cyan-300">
-            TCF Canada Prep
-          </h1>
-          <p className="text-slate-400 mt-2">Master French for your immigration exam.</p>
-        </div>
-        
-        <div className="flex gap-3">
-             <div className="flex items-center gap-1.5 px-3 py-3 bg-slate-800 rounded-lg border border-slate-700" title="Study Streak">
-                 <Flame className={`w-5 h-5 ${streak > 0 ? 'text-orange-500 fill-orange-500' : 'text-slate-600'}`} />
-                 <span className={`font-mono font-bold ${streak > 0 ? 'text-orange-400' : 'text-slate-500'}`}>{streak}</span>
-             </div>
+  const renderHome = () => {
+    // Calculate total due
+    const allDueCount = data.reduce((acc, cat) => 
+        acc + cat.units.reduce((uAcc, unit) => 
+            uAcc + unit.cards.filter(c => isCardDue(c)).length, 0
+        ), 0
+    );
 
-             <button 
-               onClick={handleNotificationToggle}
-               className={`p-3 rounded-lg border transition ${notificationsEnabled ? 'bg-indigo-900/50 border-indigo-500 text-indigo-300' : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-white'}`}
-               title={notificationsEnabled ? "Notifications Active" : "Enable Study Reminders"}
-             >
-                {notificationsEnabled ? <Bell className="w-5 h-5" /> : <BellOff className="w-5 h-5" />}
-             </button>
-
-            <button
-                onClick={() => setIsSyncOpen(true)}
-                className={`
-                  px-4 py-3 rounded-lg font-medium flex items-center gap-2 border transition relative
-                  ${isConnected 
-                    ? 'bg-slate-800/50 border-slate-700 text-slate-300 hover:bg-slate-800 hover:text-white' 
-                    : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-white hover:border-slate-500'
-                  }
-                `}
-            >
-                {!isConnected ? <CloudOff className="w-5 h-5" /> 
-                : syncStatus === 'syncing' ? <Loader2 className="w-5 h-5 animate-spin text-indigo-400" /> 
-                : syncStatus === 'saved' ? <CheckCircle className="w-5 h-5 text-green-400" />
-                : <Cloud className="w-5 h-5 text-indigo-400" />}
-                
-                <span className="hidden sm:inline text-sm">
-                   {!isConnected ? "Connect Cloud" 
-                    : syncStatus === 'syncing' ? "Saving..." 
-                    : syncStatus === 'saved' ? "Saved" 
-                    : "Cloud Active"}
-                </span>
-            </button>
-
-            <button 
-              onClick={() => setIsImportOpen(true)}
-              className="bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-3 rounded-lg font-medium flex items-center gap-2 shadow-lg transition"
-            >
-            <Plus className="w-5 h-5" />
-            Import
-            </button>
-        </div>
-      </header>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-6">
-        {data.map((cat, catIdx) => (
-          <div key={cat.id} className="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden flex flex-col shadow-xl">
-            <div className="p-5 bg-slate-800/50 border-b border-slate-700 flex items-center gap-3">
-              <div className="p-2 bg-indigo-500/10 rounded-lg text-indigo-400">
-                <Layers className="w-5 h-5" />
-              </div>
-              <h2 className="text-lg font-bold text-white">{cat.name}</h2>
-              
-              <div className="ml-auto flex items-center gap-2">
-                 <button 
-                   onClick={() => handleExportCategory(cat)}
-                   className="p-1.5 text-slate-500 hover:text-white hover:bg-slate-700 rounded transition"
-                   title="Export to JSON"
-                 >
-                   <Download className="w-4 h-4" />
-                 </button>
-                 <span className="text-xs font-mono text-slate-500 px-2 py-1 bg-slate-900 rounded">
-                   {cat.units.reduce((acc, u) => acc + u.cards.length, 0)} cards
-                 </span>
-              </div>
+    return (
+        <div className="max-w-5xl mx-auto w-full p-6">
+          <header className="mb-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div>
+              <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-indigo-400 to-cyan-300">
+                TCF Canada Prep
+              </h1>
+              <p className="text-slate-400 mt-2">Master French for your immigration exam.</p>
             </div>
             
-            <div className="flex-1 p-2 max-h-[300px] overflow-y-auto no-scrollbar">
-              {cat.units.length === 0 ? (
-                <div className="h-full flex flex-col items-center justify-center text-slate-500 p-8 text-center text-sm">
-                  No units created yet.
+            <div className="flex gap-3">
+                 <div className="flex items-center gap-1.5 px-3 py-3 bg-slate-800 rounded-lg border border-slate-700" title="Study Streak">
+                     <Flame className={`w-5 h-5 ${streak > 0 ? 'text-orange-500 fill-orange-500' : 'text-slate-600'}`} />
+                     <span className={`font-mono font-bold ${streak > 0 ? 'text-orange-400' : 'text-slate-500'}`}>{streak}</span>
+                 </div>
+    
+                 <button 
+                   onClick={handleNotificationToggle}
+                   className={`p-3 rounded-lg border transition ${notificationsEnabled ? 'bg-indigo-900/50 border-indigo-500 text-indigo-300' : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-white'}`}
+                   title={notificationsEnabled ? "Notifications Active" : "Enable Study Reminders"}
+                 >
+                    {notificationsEnabled ? <Bell className="w-5 h-5" /> : <BellOff className="w-5 h-5" />}
+                 </button>
+    
+                <button
+                    onClick={() => setIsSyncOpen(true)}
+                    className={`
+                      px-4 py-3 rounded-lg font-medium flex items-center gap-2 border transition relative
+                      ${isConnected 
+                        ? 'bg-slate-800/50 border-slate-700 text-slate-300 hover:bg-slate-800 hover:text-white' 
+                        : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-white hover:border-slate-500'
+                      }
+                    `}
+                >
+                    {!isConnected ? <CloudOff className="w-5 h-5" /> 
+                    : syncStatus === 'syncing' ? <Loader2 className="w-5 h-5 animate-spin text-indigo-400" /> 
+                    : syncStatus === 'saved' ? <CheckCircle className="w-5 h-5 text-green-400" />
+                    : <Cloud className="w-5 h-5 text-indigo-400" />}
+                    
+                    <span className="hidden sm:inline text-sm">
+                       {!isConnected ? "Connect Cloud" 
+                        : syncStatus === 'syncing' ? "Saving..." 
+                        : syncStatus === 'saved' ? "Saved" 
+                        : "Cloud Active"}
+                    </span>
+                </button>
+    
+                <button 
+                  onClick={() => setIsImportOpen(true)}
+                  className="bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-3 rounded-lg font-medium flex items-center gap-2 shadow-lg transition"
+                >
+                <Plus className="w-5 h-5" />
+                Import
+                </button>
+            </div>
+          </header>
+
+          {/* Review Dashboard Panel */}
+          <div className="mb-8 p-6 bg-gradient-to-r from-indigo-900/50 to-purple-900/50 rounded-2xl border border-indigo-500/30 flex items-center justify-between shadow-lg relative overflow-hidden group">
+            <div className="absolute top-0 right-0 p-8 opacity-10 transform translate-x-1/3 -translate-y-1/3 pointer-events-none">
+                <Brain className="w-48 h-48 text-indigo-400" />
+            </div>
+            <div className="relative z-10">
+                <h2 className="text-2xl font-bold text-white mb-2">Review Dashboard</h2>
+                <p className="text-indigo-200 mb-4 max-w-md">You have <span className="font-bold text-white">{allDueCount}</span> cards due for review.</p>
+                <div className="flex gap-2 text-sm text-slate-400">
+                    <span className="flex items-center gap-1"><Brain className="w-4 h-4"/> Spaced Repetition Active</span>
                 </div>
-              ) : (
-                <div className="space-y-1">
-                  {cat.units.map((unit, unitIdx) => {
-                    const dueCount = countDueCards(unit.cards);
-                    return (
-                      <div 
-                        key={unit.id}
-                        onClick={() => handleUnitClick(cat.id, unit.id)}
-                        className="group flex items-center justify-between p-3 rounded-lg hover:bg-slate-700/50 cursor-pointer transition border border-transparent hover:border-slate-600"
-                      >
-                        <div className="flex items-center gap-3">
-                          <BookOpen className="w-4 h-4 text-slate-500 group-hover:text-indigo-400 transition" />
-                          <span className="text-slate-300 group-hover:text-white font-medium text-sm">
-                            {unit.name}
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-3">
-                          {dueCount > 0 && (
-                              <div className="flex items-center gap-1 bg-orange-500/10 px-2 py-0.5 rounded text-orange-400 border border-orange-500/20" title="Cards due for review">
-                                  <Brain className="w-3 h-3" />
-                                  <span className="text-xs font-bold">{dueCount}</span>
-                              </div>
-                          )}
-                          <span className="text-xs text-slate-500 font-mono">
-                              {unit.cards.length}
-                          </span>
-                          <button 
-                              className="p-1 hover:text-red-400 text-slate-600 transition"
-                              onClick={(e) => handleDeleteUnit(e, catIdx, unitIdx)}
-                              title="Delete Unit"
-                          >
-                              <Trash2 className="w-3 h-3" />
-                          </button>
-                          <ChevronRight className="w-4 h-4 text-slate-600 group-hover:text-white transition" />
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
+            </div>
+            <div className="relative z-10">
+                <button 
+                    onClick={() => setViewState(ViewState.STUDY_ALL)}
+                    disabled={allDueCount === 0}
+                    className="px-8 py-4 bg-white text-indigo-900 font-bold rounded-xl shadow-xl hover:bg-indigo-50 transition transform hover:scale-105 disabled:opacity-50 disabled:transform-none flex items-center gap-3"
+                >
+                    <Play className="w-5 h-5 fill-current" />
+                    {allDueCount > 0 ? 'Review All Due' : 'All Caught Up!'}
+                </button>
             </div>
           </div>
-        ))}
-      </div>
-    </div>
-  );
-
-  const renderStudy = () => {
-    const category = data.find(c => c.id === selectedCategory);
-    const unit = category?.units.find(u => u.id === selectedUnit);
-
-    if (!category || !unit || unit.cards.length === 0) {
-      return (
-        <div className="flex flex-col items-center justify-center h-screen">
-            <p className="text-red-400">Unit not found or empty.</p>
-            <button onClick={() => setViewState(ViewState.HOME)} className="mt-4 text-white underline">Go Home</button>
+    
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-6">
+            {data.map((cat, catIdx) => (
+              <div key={cat.id} className="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden flex flex-col shadow-xl">
+                <div className="p-5 bg-slate-800/50 border-b border-slate-700 flex items-center gap-3">
+                  <div className="p-2 bg-indigo-500/10 rounded-lg text-indigo-400">
+                    <Layers className="w-5 h-5" />
+                  </div>
+                  <h2 className="text-lg font-bold text-white">{cat.name}</h2>
+                  
+                  <div className="ml-auto flex items-center gap-2">
+                     <button 
+                       onClick={() => handleExportCategory(cat)}
+                       className="p-1.5 text-slate-500 hover:text-white hover:bg-slate-700 rounded transition"
+                       title="Export to JSON"
+                     >
+                       <Download className="w-4 h-4" />
+                     </button>
+                     <span className="text-xs font-mono text-slate-500 px-2 py-1 bg-slate-900 rounded">
+                       {cat.units.reduce((acc, u) => acc + u.cards.length, 0)} cards
+                     </span>
+                  </div>
+                </div>
+                
+                <div className="flex-1 p-2 max-h-[300px] overflow-y-auto no-scrollbar">
+                  {cat.units.length === 0 ? (
+                    <div className="h-full flex flex-col items-center justify-center text-slate-500 p-8 text-center text-sm">
+                      No units created yet.
+                    </div>
+                  ) : (
+                    <div className="space-y-1">
+                      {cat.units.map((unit, unitIdx) => {
+                        const dueCount = countDueCards(unit.cards);
+                        return (
+                          <div 
+                            key={unit.id}
+                            onClick={() => handleUnitClick(cat.id, unit.id)}
+                            className="group flex items-center justify-between p-3 rounded-lg hover:bg-slate-700/50 cursor-pointer transition border border-transparent hover:border-slate-600"
+                          >
+                            <div className="flex items-center gap-3">
+                              <BookOpen className="w-4 h-4 text-slate-500 group-hover:text-indigo-400 transition" />
+                              <span className="text-slate-300 group-hover:text-white font-medium text-sm">
+                                {unit.name}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-3">
+                              {dueCount > 0 && (
+                                  <div className="flex items-center gap-1 bg-orange-500/10 px-2 py-0.5 rounded text-orange-400 border border-orange-500/20" title="Cards due for review">
+                                      <Brain className="w-3 h-3" />
+                                      <span className="text-xs font-bold">{dueCount}</span>
+                                  </div>
+                              )}
+                              <span className="text-xs text-slate-500 font-mono">
+                                  {unit.cards.length}
+                              </span>
+                              <button 
+                                  className="p-1 hover:text-red-400 text-slate-600 transition"
+                                  onClick={(e) => handleDeleteUnit(e, catIdx, unitIdx)}
+                                  title="Delete Unit"
+                              >
+                                  <Trash2 className="w-3 h-3" />
+                              </button>
+                              <ChevronRight className="w-4 h-4 text-slate-600 group-hover:text-white transition" />
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       );
+  }
+
+  const renderStudy = () => {
+    let cardsToStudy: Flashcard[] = [];
+    let title = "";
+    let unitIdForProgress = "";
+
+    if (viewState === ViewState.STUDY_ALL) {
+        // Collect all due cards
+        data.forEach(cat => cat.units.forEach(u => {
+            u.cards.forEach(c => {
+                if (isCardDue(c)) {
+                    cardsToStudy.push(c);
+                }
+            });
+        }));
+        title = "Review All Due Cards";
+        unitIdForProgress = "review-all-session";
+    } else {
+        const category = data.find(c => c.id === selectedCategory);
+        const unit = category?.units.find(u => u.id === selectedUnit);
+        if (category && unit) {
+            cardsToStudy = unit.cards;
+            title = `${category.name} - ${unit.name}`;
+            unitIdForProgress = unit.id;
+        } else {
+             return (
+                <div className="flex flex-col items-center justify-center h-screen">
+                    <p className="text-red-400">Unit not found or empty.</p>
+                    <button onClick={() => setViewState(ViewState.HOME)} className="mt-4 text-white underline">Go Home</button>
+                </div>
+              );
+        }
+    }
+
+    if (viewState === ViewState.STUDY_ALL && cardsToStudy.length === 0) {
+         return (
+            <div className="flex flex-col items-center justify-center h-screen p-6 text-center">
+                <CheckCircle className="w-16 h-16 text-green-400 mb-4" />
+                <h2 className="text-2xl font-bold text-white mb-2">No Due Cards</h2>
+                <p className="text-slate-400 mb-8 max-w-md">You have no cards waiting for review at this moment. Great job!</p>
+                <button 
+                    onClick={() => setViewState(ViewState.HOME)}
+                    className="bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-3 rounded-lg font-medium shadow-lg transition"
+                >
+                    Back to Dashboard
+                </button>
+            </div>
+         );
     }
 
     return (
       <FlashcardView 
-        cards={unit.cards} 
-        title={`${category.name} - ${unit.name}`}
+        cards={cardsToStudy} 
+        title={title}
         onBack={() => setViewState(ViewState.HOME)}
-        unitId={unit.id}
+        unitId={unitIdForProgress}
         onUpdateCard={handleUpdateCard}
         onStudyActivity={handleStudyActivity}
       />
@@ -501,7 +570,7 @@ export default function App() {
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100 font-sans selection:bg-indigo-500/30">
       {viewState === ViewState.HOME && renderHome()}
-      {viewState === ViewState.STUDY && renderStudy()}
+      {(viewState === ViewState.STUDY || viewState === ViewState.STUDY_ALL) && renderStudy()}
       
       <ImportModal 
         isOpen={isImportOpen} 
