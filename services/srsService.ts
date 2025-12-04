@@ -14,8 +14,12 @@ export const INITIAL_SRS_DATA: SRSData = {
 };
 
 /**
- * Calculates the new SRS state for a card based on the user's rating.
- * Based on a simplified SM-2 algorithm.
+ * Calculates the new SRS state.
+ * Implements user requested fixed intervals for initial learning:
+ * Again -> 5 min
+ * Hard -> 20 min
+ * Good -> 1 day
+ * Easy -> 7 days
  */
 export const calculateNextReview = (
   currentSRS: SRSData | undefined, 
@@ -25,68 +29,79 @@ export const calculateNextReview = (
   
   let { interval, repetition, easeFactor } = srs;
   
-  // Mapping buttons to SM-2 numeric quality (0-5 scale roughly)
-  // We simplify to 4 buttons for UX
-  let quality = 0;
-  switch (grade) {
-    case 'again': quality = 0; break; // Fail
-    case 'hard': quality = 3; break;  // Pass but difficult
-    case 'good': quality = 4; break;  // Pass
-    case 'easy': quality = 5; break;  // Perfect
-  }
-
-  if (quality < 3) {
-    // If failed, reset repetitions and start over interval
-    repetition = 0;
-    interval = 1; 
-  } else {
-    // If passed
-    if (repetition === 0) {
-      interval = 1;
-    } else if (repetition === 1) {
-      interval = 6;
-    } else {
-      interval = Math.round(interval * easeFactor);
-    }
-    repetition += 1;
-  }
-
-  // Update Ease Factor (standard SM-2 formula)
-  // EF' = EF + (0.1 - (5 - q) * (0.08 + (5 - q) * 0.02))
-  easeFactor = easeFactor + (0.1 - (5 - quality) * (0.08 + (5 - quality) * 0.02));
-  if (easeFactor < 1.3) easeFactor = 1.3; // Minimum floor
-
-  // Add random "fuzz" to interval to prevent card bunching on the same day
-  // only if interval is > 2 days
-  if (interval > 2) {
-      const fuzz = Math.random() * 0.1 + 0.95; // +/- 5%
-      interval = Math.floor(interval * fuzz);
-  }
-
-  // Calculate Due Date
-  const ONE_DAY_MS = 24 * 60 * 60 * 1000;
-  // If 'again', due in 1 minute (effectively immediately for this session) logic handled by queue, 
-  // but simpler to just set to tomorrow or "now" + small buffer.
-  // For this app, 'again' means "show me again this session" or "reset to day 1".
-  // We will set due date to Today + Interval.
+  const MINUTE = 60 * 1000;
+  const DAY = 24 * 60 * MINUTE;
   
-  const dueDate = Date.now() + (interval * ONE_DAY_MS);
+  let addedTime = 0;
+
+  // Logic splits based on whether card is "New/Learning" (repetition === 0) or "Graduated"
+  
+  if (grade === 'again') {
+      // FAIL: Reset progress, review in 5 minutes
+      repetition = 0;
+      interval = 0; // 0 indicates < 1 day
+      addedTime = 5 * MINUTE;
+      
+      // Decrease ease slightly
+      easeFactor = Math.max(1.3, easeFactor - 0.2);
+  } 
+  else if (grade === 'hard') {
+      // HARD: Review in 20 minutes
+      // We treat 'Hard' as a short-term step if interval is small
+      interval = 0;
+      addedTime = 20 * MINUTE;
+      
+      easeFactor = Math.max(1.3, easeFactor - 0.15);
+  }
+  else if (grade === 'good') {
+      // GOOD: Standard progress
+      if (repetition === 0) {
+          // New card -> 1 Day
+          interval = 1;
+          addedTime = 1 * DAY;
+      } else {
+          // Graduated -> Interval * Ease
+          interval = Math.max(1, Math.floor(interval * easeFactor));
+          addedTime = interval * DAY;
+      }
+      repetition += 1;
+  }
+  else if (grade === 'easy') {
+      // EASY: Bonus jump
+      if (repetition === 0) {
+          // New card -> 7 Days
+          interval = 7;
+          addedTime = 7 * DAY;
+      } else {
+          // Graduated -> Interval * Ease * Bonus
+          interval = Math.max(1, Math.floor(interval * easeFactor * 1.3));
+          addedTime = interval * DAY;
+      }
+      repetition += 1;
+      easeFactor += 0.15;
+  }
 
   return {
     interval,
     repetition,
     easeFactor,
-    dueDate
+    dueDate: Date.now() + addedTime
   };
 };
 
 export const getDueDateLabel = (timestamp: number): string => {
   const diff = timestamp - Date.now();
-  const days = Math.ceil(diff / (1000 * 60 * 60 * 24));
   
-  if (days <= 0) return "Now";
-  if (days === 1) return "1 day";
-  return `${days} days`;
+  if (diff <= 0) return "Now";
+  
+  const minutes = Math.ceil(diff / (60 * 1000));
+  if (minutes < 60) return `${minutes}m`;
+  
+  const hours = Math.ceil(diff / (60 * 60 * 1000));
+  if (hours < 24) return `${hours}h`;
+  
+  const days = Math.ceil(diff / (24 * 60 * 60 * 1000));
+  return `${days}d`;
 };
 
 export const isCardDue = (card: Flashcard): boolean => {

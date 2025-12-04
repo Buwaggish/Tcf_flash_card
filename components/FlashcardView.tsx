@@ -214,20 +214,37 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ cards, title, onBa
     cancelSpeech();
     setIsFlipped(false);
     
-    // Slight delay for animation
+    // Animation Delay
     setTimeout(() => {
       const currentIndex = studyQueue.findIndex(c => c.id === currentCard.id);
       
       if (currentIndex !== -1) {
           const nextQueue = [...studyQueue];
-          nextQueue.splice(currentIndex, 1);
-          setStudyQueue(nextQueue);
-          
-          if (nextQueue.length > 0) {
-            setCurrentCard(nextQueue[0]);
+
+          // RE-QUEUE LOGIC:
+          // If the next interval is 0 (meaning minutes, e.g. 5m or 20m), 
+          // we keep it in the current session queue so user sees it again.
+          const isRequeue = newSRS.interval === 0;
+
+          if (isRequeue) {
+              // Update the queued object with new SRS data
+              nextQueue[currentIndex] = { ...nextQueue[currentIndex], srs: newSRS };
+              // Move to end of queue to see it later in session
+              const [cardToRequeue] = nextQueue.splice(currentIndex, 1);
+              nextQueue.push(cardToRequeue);
+              
+              setStudyQueue(nextQueue);
+              setCurrentCard(nextQueue[0]);
           } else {
-            setCurrentCard(null);
-            setSessionComplete(true);
+              // Standard remove (Good/Easy means done for today)
+              nextQueue.splice(currentIndex, 1);
+              setStudyQueue(nextQueue);
+              if (nextQueue.length > 0) {
+                setCurrentCard(nextQueue[0]);
+              } else {
+                setCurrentCard(null);
+                setSessionComplete(true);
+              }
           }
       }
     }, 150);
@@ -242,9 +259,7 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ cards, title, onBa
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement) return;
 
       if (e.key === ' ' || e.key === 'Enter') {
-        if (!isFlipped) {
-            setIsFlipped(true);
-        }
+        setIsFlipped(p => !p); // Toggle flip
       } else if (e.key.toLowerCase() === 'p') {
          if (currentCard) handlePlayAudio(currentCard.back);
       } else if (e.key.toLowerCase() === 'o') {
@@ -263,6 +278,7 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ cards, title, onBa
   const isFrenchLong = currentCard ? currentCard.back.split(' ').length > 4 : false;
   const isDue = currentCard ? isCardDue(currentCard) : false;
 
+  // Calculate future intervals for display
   const nextAgain = currentCard ? calculateNextReview(currentCard.srs, 'again') : null;
   const nextHard = currentCard ? calculateNextReview(currentCard.srs, 'hard') : null;
   const nextGood = currentCard ? calculateNextReview(currentCard.srs, 'good') : null;
@@ -458,7 +474,7 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ cards, title, onBa
                     className={`relative w-full max-w-lg transition-all duration-500 transform-style-3d cursor-pointer group 
                         min-h-[50vh] md:h-auto md:aspect-[4/3]
                         ${isFlipped ? 'rotate-y-180' : ''}`}
-                    onClick={() => { if(!isFlipped) setIsFlipped(true); }}
+                    onClick={() => setIsFlipped(prev => !prev)}
                     >
                     {/* Front */}
                     <div className="absolute inset-0 backface-hidden bg-slate-800 border-2 border-slate-700 rounded-2xl shadow-2xl flex flex-col items-center justify-center p-8 group-hover:border-indigo-500/50 transition">
@@ -474,7 +490,7 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ cards, title, onBa
                         
                         {/* AI Explanation Overlay */}
                         {aiExplanation && (
-                            <div className="absolute top-0 left-0 right-0 bg-slate-900/95 p-4 z-10 rounded-t-xl border-b border-indigo-500/30 text-left overflow-y-auto max-h-[160px] animate-in slide-in-from-top-2">
+                            <div className="absolute top-0 left-0 right-0 bg-slate-900/95 p-4 z-10 rounded-t-xl border-b border-indigo-500/30 text-left overflow-y-auto max-h-[160px] animate-in slide-in-from-top-2" onClick={e => e.stopPropagation()}>
                                 <p className="text-xs font-bold text-indigo-400 uppercase mb-1">AI Context</p>
                                 <div className="text-sm text-slate-200 whitespace-pre-wrap">{aiExplanation}</div>
                             </div>
@@ -534,19 +550,19 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ cards, title, onBa
                     {isFlipped ? (
                         <div className="grid grid-cols-4 gap-2 md:gap-4 h-full">
                             <button onClick={(e) => handleRate('again', e)} className="flex flex-col items-center justify-center bg-red-500/20 hover:bg-red-500/40 border border-red-500/50 rounded-xl transition">
-                                <span className="text-xs text-red-300 font-bold uppercase mb-1">Again (1)</span>
+                                <span className="text-xs text-red-300 font-bold uppercase mb-1">Again</span>
                                 <span className="text-xs text-red-200 opacity-60">{nextAgain ? getDueDateLabel(nextAgain.dueDate) : '-'}</span>
                             </button>
                             <button onClick={(e) => handleRate('hard', e)} className="flex flex-col items-center justify-center bg-orange-500/20 hover:bg-orange-500/40 border border-orange-500/50 rounded-xl transition">
-                                <span className="text-xs text-orange-300 font-bold uppercase mb-1">Hard (2)</span>
+                                <span className="text-xs text-orange-300 font-bold uppercase mb-1">Hard</span>
                                 <span className="text-xs text-orange-200 opacity-60">{nextHard ? getDueDateLabel(nextHard.dueDate) : '-'}</span>
                             </button>
                             <button onClick={(e) => handleRate('good', e)} className="flex flex-col items-center justify-center bg-green-500/20 hover:bg-green-500/40 border border-green-500/50 rounded-xl transition">
-                                <span className="text-xs text-green-300 font-bold uppercase mb-1">Good (3)</span>
+                                <span className="text-xs text-green-300 font-bold uppercase mb-1">Good</span>
                                 <span className="text-xs text-green-200 opacity-60">{nextGood ? getDueDateLabel(nextGood.dueDate) : '-'}</span>
                             </button>
                             <button onClick={(e) => handleRate('easy', e)} className="flex flex-col items-center justify-center bg-cyan-500/20 hover:bg-cyan-500/40 border border-cyan-500/50 rounded-xl transition">
-                                <span className="text-xs text-cyan-300 font-bold uppercase mb-1">Easy (4)</span>
+                                <span className="text-xs text-cyan-300 font-bold uppercase mb-1">Easy</span>
                                 <span className="text-xs text-cyan-200 opacity-60">{nextEasy ? getDueDateLabel(nextEasy.dueDate) : '-'}</span>
                             </button>
                         </div>
