@@ -1,10 +1,10 @@
 import { Flashcard, SRSData } from "../types";
 
 // Grades: 
-// 0: Again (Complete blackout)
-// 1: Hard (Remembered with great difficulty)
-// 2: Good (Remembered with some hesitation)
-// 3: Easy (Perfect recall)
+// 0: Again (Fail)
+// 1: Hard
+// 2: Good
+// 3: Easy
 
 export const INITIAL_SRS_DATA: SRSData = {
   interval: 0,
@@ -14,12 +14,13 @@ export const INITIAL_SRS_DATA: SRSData = {
 };
 
 /**
- * Calculates the new SRS state.
- * Implements user requested fixed intervals for initial learning:
- * Again -> 5 min
- * Hard -> 20 min
- * Good -> 1 day
- * Easy -> 7 days
+ * Calculates the new SRS state based on user feedback.
+ * 
+ * Intervals:
+ * Again -> 5 minutes
+ * Hard  -> 20 minutes
+ * Good  -> 1 day
+ * Easy  -> 7 days
  */
 export const calculateNextReview = (
   currentSRS: SRSData | undefined, 
@@ -34,47 +35,42 @@ export const calculateNextReview = (
   
   let addedTime = 0;
 
-  // Logic splits based on whether card is "New/Learning" (repetition === 0) or "Graduated"
-  
   if (grade === 'again') {
-      // FAIL: Reset progress, review in 5 minutes
+      // FAIL: Review in 5 minutes
       repetition = 0;
-      interval = 0; // 0 indicates < 1 day
+      interval = 0; 
       addedTime = 5 * MINUTE;
       
-      // Decrease ease slightly
+      // Decrease ease
       easeFactor = Math.max(1.3, easeFactor - 0.2);
   } 
   else if (grade === 'hard') {
       // HARD: Review in 20 minutes
-      // We treat 'Hard' as a short-term step if interval is small
       interval = 0;
       addedTime = 20 * MINUTE;
       
       easeFactor = Math.max(1.3, easeFactor - 0.15);
   }
   else if (grade === 'good') {
-      // GOOD: Standard progress
+      // GOOD: 1 Day (if new)
       if (repetition === 0) {
-          // New card -> 1 Day
           interval = 1;
           addedTime = 1 * DAY;
       } else {
-          // Graduated -> Interval * Ease
-          interval = Math.max(1, Math.floor(interval * easeFactor));
+          // Standard SM2 growth
+          interval = Math.max(1, Math.round(interval * easeFactor));
           addedTime = interval * DAY;
       }
       repetition += 1;
   }
   else if (grade === 'easy') {
-      // EASY: Bonus jump
+      // EASY: 7 Days (if new)
       if (repetition === 0) {
-          // New card -> 7 Days
           interval = 7;
           addedTime = 7 * DAY;
       } else {
-          // Graduated -> Interval * Ease * Bonus
-          interval = Math.max(1, Math.floor(interval * easeFactor * 1.3));
+          // Bonus growth
+          interval = Math.max(1, Math.round(interval * easeFactor * 1.3));
           addedTime = interval * DAY;
       }
       repetition += 1;
@@ -104,14 +100,25 @@ export const getDueDateLabel = (timestamp: number): string => {
   return `${days}d`;
 };
 
+// Broad check for UI "Due" badge (includes New cards)
 export const isCardDue = (card: Flashcard): boolean => {
-  if (!card.srs) return true; // New card
+  if (!card.srs) return true; // New card is treated as due
   return card.srs.dueDate <= Date.now();
+};
+
+// Strict priority helper for Sorting
+// 0: Active Due (Has SRS, Time passed) - Priority High
+// 1: New (No SRS) - Priority Medium
+// 2: Future (Has SRS, Time future) - Priority Low
+export const getCardPriority = (card: Flashcard): number => {
+    if (!card.srs) return 1; // New
+    if (card.srs.dueDate <= Date.now()) return 0; // Active Due
+    return 2; // Future
 };
 
 export const getCardStatusLabel = (card: Flashcard): { label: string, type: 'new' | 'due' | 'ok' } => {
   if (!card.srs) return { label: 'New', type: 'new' };
-  if (isCardDue(card)) return { label: 'Due', type: 'due' };
+  if (card.srs.dueDate <= Date.now()) return { label: 'Due', type: 'due' };
   
   return { label: getDueDateLabel(card.srs.dueDate), type: 'ok' };
 };

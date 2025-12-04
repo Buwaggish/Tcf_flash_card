@@ -152,6 +152,7 @@ export const SyncModal: React.FC<SyncModalProps> = ({
                   <li>Create project at <b>supabase.com</b></li>
                   <li>Run SQL: <code>create table tcf_sync (id int8 primary key, content jsonb, updated_at timestamptz);</code></li>
                   <li>Run SQL: <code>insert into tcf_sync (id, content) values (1, '[]');</code></li>
+                  <li className="text-orange-300 mt-1">Run SQL: <code>create table study_logs (date_id text primary key, duration int, updated_at timestamptz);</code></li>
               </ol>
             </div>
           )}

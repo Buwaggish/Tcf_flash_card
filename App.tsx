@@ -3,8 +3,8 @@ import { AppData, Category, Flashcard, ImportItem, ViewState } from './types';
 import { ImportModal } from './components/ImportModal';
 import { FlashcardView } from './components/FlashcardView';
 import { SyncModal } from './components/SyncModal';
-import { Plus, BookOpen, ChevronRight, Layers, Trash2, Cloud, Loader2, CheckCircle, CloudOff, Brain, Download, Bell, BellOff, Flame, Play } from 'lucide-react';
-import { initSupabase, syncData, pushData, consolidateData } from './services/syncService';
+import { Plus, BookOpen, ChevronRight, Layers, Trash2, Cloud, Loader2, CheckCircle, CloudOff, Brain, Download, Bell, BellOff, Flame, Play, Clock } from 'lucide-react';
+import { initSupabase, syncData, pushData, consolidateData, saveStudyLog } from './services/syncService';
 import { isCardDue } from './services/srsService';
 
 // Simple UUID generator
@@ -28,28 +28,62 @@ export default function App() {
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const [lastNotificationTime, setLastNotificationTime] = useState(0);
 
-  // Streak State
+  // Streak & Timer
   const [streak, setStreak] = useState(0);
+  const [todayStudyTime, setTodayStudyTime] = useState(0); // seconds
+
+  // --- TIMER LOGIC ---
+  useEffect(() => {
+      const today = new Date().toDateString();
+      const savedDate = localStorage.getItem('tcf-study-date');
+      if (savedDate === today) {
+          const savedTime = parseInt(localStorage.getItem('tcf-study-time') || '0', 10);
+          setTodayStudyTime(savedTime);
+      } else {
+          localStorage.setItem('tcf-study-date', today);
+          localStorage.setItem('tcf-study-time', '0');
+          setTodayStudyTime(0);
+      }
+
+      const interval = setInterval(() => {
+          if (document.visibilityState === 'visible') {
+              setTodayStudyTime(prev => {
+                  const newVal = prev + 1;
+                  if (newVal % 10 === 0) { 
+                      localStorage.setItem('tcf-study-time', newVal.toString());
+                  }
+                  if (newVal % 60 === 0) { 
+                      const dateKey = new Date().toISOString().split('T')[0];
+                      saveStudyLog(dateKey, newVal);
+                  }
+                  return newVal;
+              });
+          }
+      }, 1000);
+
+      return () => clearInterval(interval);
+  }, []);
+
+  const formatTime = (seconds: number) => {
+      const h = Math.floor(seconds / 3600);
+      const m = Math.floor((seconds % 3600) / 60);
+      if (h > 0) return `${h}h ${m}m`;
+      return `${m}m`;
+  };
 
   useEffect(() => {
-    // Check initial permission on load
     if ('Notification' in window && Notification.permission === 'granted') {
       setNotificationsEnabled(true);
     }
-    // Load streak
     const savedStreak = parseInt(localStorage.getItem('tcf-streak') || '0', 10);
     const lastDate = localStorage.getItem('tcf-last-study-date');
     
-    // Check if streak is valid (yesterday or today)
     if (lastDate) {
         const today = new Date().toDateString();
         const yesterday = new Date(Date.now() - 86400000).toDateString();
-        if (lastDate === today) {
-            setStreak(savedStreak);
-        } else if (lastDate === yesterday) {
+        if (lastDate === today || lastDate === yesterday) {
             setStreak(savedStreak);
         } else {
-            // Broken streak
             setStreak(0);
             localStorage.setItem('tcf-streak', '0');
         }
@@ -63,9 +97,7 @@ export default function App() {
       const lastDate = localStorage.getItem('tcf-last-study-date');
 
       if (lastDate !== today) {
-          // Increment streak if not already studied today
           let newStreak = 1;
-          // Check if extended from yesterday
           const yesterday = new Date(Date.now() - 86400000).toDateString();
           if (lastDate === yesterday) {
               const current = parseInt(localStorage.getItem('tcf-streak') || '0', 10);
@@ -84,23 +116,18 @@ export default function App() {
       return;
     }
 
-    // 1. If currently enabled, disable it (logically)
     if (notificationsEnabled) {
       setNotificationsEnabled(false);
       return;
     }
 
-    // 2. If disabled, try to enable
     try {
       if (Notification.permission === 'granted') {
-        // Permission exists, just enable logic
         setNotificationsEnabled(true);
         new Notification("Study Reminders Active", { body: "We'll let you know when cards are due." });
       } else if (Notification.permission === 'denied') {
-        // Permission was denied previously
         alert("Notifications are blocked by your browser. Please click the lock icon in the URL bar to allow notifications for this site.");
       } else {
-        // Request permission
         const permission = await Notification.requestPermission();
         if (permission === 'granted') {
           setNotificationsEnabled(true);
@@ -113,13 +140,12 @@ export default function App() {
     }
   };
 
-  // Notification Polling (Every 5 mins check, notify max once per hour)
+  // Notification Polling
   useEffect(() => {
     if (!notificationsEnabled) return;
 
     const checkDue = () => {
       const now = Date.now();
-      // Don't notify if notified in last 60 mins
       if (now - lastNotificationTime < 60 * 60 * 1000) return;
 
       let totalDue = 0;
@@ -128,7 +154,6 @@ export default function App() {
       }));
 
       if (totalDue > 0) {
-        // Double check permission before sending
         if (Notification.permission === 'granted') {
             new Notification("TCF Prep Reminder", {
                 body: `You have ${totalDue} cards due for review. Keep up the streak!`,
@@ -139,13 +164,12 @@ export default function App() {
       }
     };
 
-    const interval = setInterval(checkDue, 5 * 60 * 1000); // Check every 5 mins
+    const interval = setInterval(checkDue, 5 * 60 * 1000); 
     return () => clearInterval(interval);
   }, [notificationsEnabled, data, lastNotificationTime]);
 
   // Persistence Loading & Auto-Sync
   useEffect(() => {
-    // 1. Load Local
     const saved = localStorage.getItem('tcf-cards-data');
     let localData: AppData = [];
     
@@ -157,7 +181,6 @@ export default function App() {
         console.error("Failed to load local data", e);
       }
     } else {
-        // Initial Demo Data
         localData = [
             { id: generateId(), name: "Compréhension Orale", units: [] },
             { id: generateId(), name: "Expression Orale", units: [] },
@@ -167,21 +190,19 @@ export default function App() {
         setData(localData);
     }
 
-    // 2. Init Supabase & Auto Sync
     const savedConfig = localStorage.getItem('tcf-supabase-config');
     if (savedConfig) {
       try {
         const { url, key } = JSON.parse(savedConfig);
         if (initSupabase({ url, key })) {
              setIsConnected(true);
-             // Trigger background sync on load to pull remote changes
              setSyncStatus('syncing');
              syncData(localData).then((result) => {
                  if (result.success && result.data) {
                      setData(result.data);
                      setSyncStatus('saved');
                  } else {
-                     setSyncStatus('idle'); // Keep idle if sync failed but config is valid
+                     setSyncStatus('idle');
                  }
              });
         }
@@ -191,16 +212,13 @@ export default function App() {
     }
   }, []);
 
-  // Persistence Saving (Local)
   useEffect(() => {
     if (data.length > 0) {
       localStorage.setItem('tcf-cards-data', JSON.stringify(data));
     }
   }, [data]);
 
-  // Helper to trigger background cloud save
   const triggerCloudSave = async (newData: AppData) => {
-    // Always save locally via state update effect
     if (isConnected) {
         setSyncStatus('syncing');
         const result = await pushData(newData);
@@ -217,21 +235,18 @@ export default function App() {
       const newData = [...prevData];
 
       items.forEach((item) => {
-        // 1. Find or Create Category
         let category = newData.find(c => c.name.trim().toLowerCase() === item.category.trim().toLowerCase());
         if (!category) {
           category = { id: generateId(), name: item.category, units: [] };
           newData.push(category);
         }
 
-        // 2. Find or Create Unit
         let unit = category.units.find(u => u.name.trim().toLowerCase() === item.unit.trim().toLowerCase());
         if (!unit) {
           unit = { id: generateId(), name: item.unit, cards: [] };
           category.units.push(unit);
         }
 
-        // 3. Add Card
         unit.cards.push({
           id: generateId(),
           front: item.front,
@@ -240,9 +255,7 @@ export default function App() {
         });
       });
       
-      // Trigger Cloud Save
       triggerCloudSave(newData);
-      
       return newData;
     });
   };
@@ -265,7 +278,7 @@ export default function App() {
     
     setData(prev => {
       const cleaned = consolidateData(prev);
-      triggerCloudSave(cleaned); // Save to cloud immediately
+      triggerCloudSave(cleaned); 
       return cleaned;
     });
     alert("Duplicates fixed! Data has been cleaned.");
@@ -289,11 +302,9 @@ export default function App() {
       });
   }
 
-  // New handler for SRS updates
   const handleUpdateCard = (cardId: string, updates: Partial<Flashcard>) => {
       setData(prevData => {
           const newData = [...prevData];
-          // Locate card (naive search since structure is nested)
           for(const cat of newData) {
               for (const unit of cat.units) {
                   const cardIndex = unit.cards.findIndex(c => c.id === cardId);
@@ -334,7 +345,6 @@ export default function App() {
       URL.revokeObjectURL(url);
   };
 
-  // Helper to count due cards in a unit
   const countDueCards = (cards: Flashcard[]) => {
       return cards.filter(c => isCardDue(c)).length;
   };
@@ -342,7 +352,6 @@ export default function App() {
   // --- Renders ---
 
   const renderHome = () => {
-    // Calculate total due
     const allDueCount = data.reduce((acc, cat) => 
         acc + cat.units.reduce((uAcc, unit) => 
             uAcc + unit.cards.filter(c => isCardDue(c)).length, 0
@@ -360,6 +369,11 @@ export default function App() {
             </div>
             
             <div className="flex gap-3">
+                 <div className="flex items-center gap-1.5 px-3 py-3 bg-slate-800 rounded-lg border border-slate-700" title="Study Time Today">
+                     <Clock className="w-5 h-5 text-indigo-400" />
+                     <span className="font-mono font-bold text-slate-300">{formatTime(todayStudyTime)}</span>
+                 </div>
+
                  <div className="flex items-center gap-1.5 px-3 py-3 bg-slate-800 rounded-lg border border-slate-700" title="Study Streak">
                      <Flame className={`w-5 h-5 ${streak > 0 ? 'text-orange-500 fill-orange-500' : 'text-slate-600'}`} />
                      <span className={`font-mono font-bold ${streak > 0 ? 'text-orange-400' : 'text-slate-500'}`}>{streak}</span>

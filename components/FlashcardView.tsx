@@ -3,7 +3,7 @@ import { Flashcard } from '../types';
 import { getFrenchVoices, speak, cancelSpeech } from '../services/ttsService';
 import { playAzureTTS } from '../services/azureService';
 import { generateCardContext } from '../services/geminiService';
-import { calculateNextReview, getDueDateLabel, isCardDue, getCardStatusLabel } from '../services/srsService';
+import { calculateNextReview, getDueDateLabel, isCardDue, getCardStatusLabel, getCardPriority } from '../services/srsService';
 import { ArrowLeft, RefreshCw, Volume2, Play, Settings, CloudLightning, Brain, CheckCircle, List, Layers, Sparkles, Loader2, Save, Key } from 'lucide-react';
 
 interface FlashcardViewProps {
@@ -26,18 +26,39 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ cards, title, onBa
 
   // Initialize Queue
   useEffect(() => {
-    // Priority: Due Cards (Past Due) -> New Cards (No SRS) -> Future Cards
-    const due = cards.filter(c => isCardDue(c));
-    const future = cards.filter(c => !isCardDue(c)).sort((a,b) => (a.srs?.dueDate || 0) - (b.srs?.dueDate || 0));
+    // Priority Sort:
+    // 0. Active Due (Again, Hard, Due)
+    // 1. New (No SRS)
+    // 2. Future (Not due yet)
     
-    const queue = [...due, ...future];
-    setStudyQueue(queue);
+    // Sort logic
+    const sorted = [...cards].sort((a, b) => {
+        const pA = getCardPriority(a);
+        const pB = getCardPriority(b);
+        if (pA !== pB) return pA - pB;
+        
+        // Secondary sort: Due date (oldest due first)
+        const dateA = a.srs?.dueDate || 0;
+        const dateB = b.srs?.dueDate || 0;
+        return dateA - dateB;
+    });
     
-    // Only set current card if we haven't started or if the queue was refreshed externally
-    if (queue.length > 0 && !currentCard) {
-      setCurrentCard(queue[0]);
-    } else if (queue.length === 0) {
+    setStudyQueue(sorted);
+    
+    if (sorted.length > 0) {
+      if (!currentCard) {
+          setCurrentCard(sorted[0]);
+      } else {
+          // Sync current
+          const exists = sorted.find(c => c.id === currentCard.id);
+          if (!exists) {
+              setCurrentCard(sorted[0]);
+          }
+      }
+      setSessionComplete(false);
+    } else {
       setSessionComplete(true);
+      setCurrentCard(null);
     }
   }, [cards]); 
 
@@ -201,7 +222,6 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ cards, title, onBa
     e?.stopPropagation();
     if (!currentCard) return;
 
-    // Report activity for streak
     onStudyActivity?.();
 
     // 1. Calculate new state
@@ -210,11 +230,10 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ cards, title, onBa
     // 2. Persist to App State (and Cloud)
     onUpdateCard(currentCard.id, { srs: newSRS });
 
-    // 3. Move Queue
+    // 3. Move Queue Locally
     cancelSpeech();
     setIsFlipped(false);
     
-    // Animation Delay
     setTimeout(() => {
       const currentIndex = studyQueue.findIndex(c => c.id === currentCard.id);
       
@@ -222,27 +241,22 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ cards, title, onBa
           const nextQueue = [...studyQueue];
 
           // RE-QUEUE LOGIC:
-          // If the next interval is 0 (meaning minutes, e.g. 5m or 20m), 
-          // we keep it in the current session queue so user sees it again.
           const isRequeue = newSRS.interval === 0;
 
           if (isRequeue) {
-              // Update the queued object with new SRS data
               nextQueue[currentIndex] = { ...nextQueue[currentIndex], srs: newSRS };
-              // Move to end of queue to see it later in session
               const [cardToRequeue] = nextQueue.splice(currentIndex, 1);
               nextQueue.push(cardToRequeue);
               
               setStudyQueue(nextQueue);
               setCurrentCard(nextQueue[0]);
           } else {
-              // Standard remove (Good/Easy means done for today)
               nextQueue.splice(currentIndex, 1);
               setStudyQueue(nextQueue);
               if (nextQueue.length > 0) {
                 setCurrentCard(nextQueue[0]);
               } else {
-                setCurrentCard(null);
+                setCurrentCard(null); 
                 setSessionComplete(true);
               }
           }
@@ -278,7 +292,6 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({ cards, title, onBa
   const isFrenchLong = currentCard ? currentCard.back.split(' ').length > 4 : false;
   const isDue = currentCard ? isCardDue(currentCard) : false;
 
-  // Calculate future intervals for display
   const nextAgain = currentCard ? calculateNextReview(currentCard.srs, 'again') : null;
   const nextHard = currentCard ? calculateNextReview(currentCard.srs, 'hard') : null;
   const nextGood = currentCard ? calculateNextReview(currentCard.srs, 'good') : null;

@@ -5,6 +5,7 @@ let supabase: SupabaseClient | null = null;
 
 // Constants
 const TABLE_NAME = 'tcf_sync';
+const LOG_TABLE_NAME = 'study_logs';
 const ROW_ID = 1; // Single row for simple personal sync
 
 export interface SyncConfig {
@@ -47,6 +48,20 @@ export const fetchCloudCount = async (): Promise<number | null> => {
         return getCardCount(data.content as AppData);
     } catch (e) {
         return null;
+    }
+};
+
+/**
+ * Saves daily study duration to Supabase
+ */
+export const saveStudyLog = async (date: string, durationSeconds: number): Promise<void> => {
+    if (!supabase) return;
+    try {
+        await supabase
+            .from(LOG_TABLE_NAME)
+            .upsert({ date_id: date, duration: durationSeconds, updated_at: new Date() }, { onConflict: 'date_id' });
+    } catch (e) {
+        console.error("Failed to save study log", e);
     }
 };
 
