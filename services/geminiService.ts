@@ -1,8 +1,5 @@
 import { GoogleGenAI, Modality } from "@google/genai";
 
-// Initialize Gemini Client
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-
 // Helper to decode Base64 to ArrayBuffer for audio context
 function decode(base64: string): Uint8Array {
   const binaryString = atob(base64);
@@ -16,10 +13,12 @@ function decode(base64: string): Uint8Array {
 
 /**
  * Generates speech from text using Gemini 2.5 Flash TTS.
- * @param text The text to speak (French).
- * @returns AudioBuffer ready to play.
  */
-export const generateSpeech = async (text: string, audioContext: AudioContext): Promise<AudioBuffer> => {
+export const generateSpeech = async (text: string, audioContext: AudioContext, apiKey: string): Promise<AudioBuffer> => {
+  if (!apiKey) throw new Error("Google API Key is missing");
+  
+  const ai = new GoogleGenAI({ apiKey });
+
   try {
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash-preview-tts",
@@ -28,7 +27,7 @@ export const generateSpeech = async (text: string, audioContext: AudioContext): 
         responseModalities: [Modality.AUDIO],
         speechConfig: {
           voiceConfig: {
-            prebuiltVoiceConfig: { voiceName: 'Kore' }, // Using Kore as a generic clear voice
+            prebuiltVoiceConfig: { voiceName: 'Kore' }, 
           },
         },
       },
@@ -43,13 +42,42 @@ export const generateSpeech = async (text: string, audioContext: AudioContext): 
     const audioData = decode(base64Audio);
     
     // Decode the audio data into a buffer
-    // Note: decodeAudioData detaches the buffer, so we operate on a copy if needed, 
-    // but here we just consume the result.
     const decodedBuffer = await audioContext.decodeAudioData(audioData.buffer);
     return decodedBuffer;
 
   } catch (error) {
     console.error("Error generating speech:", error);
     throw error;
+  }
+};
+
+/**
+ * Generates contextual explanation for a flashcard term.
+ */
+export const generateCardContext = async (term: string, apiKey: string): Promise<string> => {
+  if (!apiKey) throw new Error("Google API Key is missing");
+
+  const ai = new GoogleGenAI({ apiKey });
+
+  try {
+    const prompt = `
+      You are a French tutor preparing a student for the TCF Canada exam.
+      Explain the term/phrase: "${term}".
+      
+      Output format (Keep it brief, max 80 words):
+      1. Definition (in French, simple)
+      2. Example Sentence (in French, relevant to immigration/daily life context)
+      3. Chinese Translation of the term and the sentence.
+    `;
+
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: prompt,
+    });
+
+    return response.text || "No explanation available.";
+  } catch (error) {
+    console.error("Context generation error:", error);
+    return "Error generating context. Please check your API Key.";
   }
 };

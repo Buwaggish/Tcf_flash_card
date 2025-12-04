@@ -3,8 +3,9 @@ import { AppData, Category, Flashcard, ImportItem, ViewState } from './types';
 import { ImportModal } from './components/ImportModal';
 import { FlashcardView } from './components/FlashcardView';
 import { SyncModal } from './components/SyncModal';
-import { Plus, BookOpen, ChevronRight, Layers, Trash2, Cloud, Loader2, CheckCircle, CloudOff } from 'lucide-react';
-import { initSupabase, syncData, pushData, isConfigured, consolidateData } from './services/syncService';
+import { Plus, BookOpen, ChevronRight, Layers, Trash2, Cloud, Loader2, CheckCircle, CloudOff, Brain, Download, Bell, BellOff, Flame } from 'lucide-react';
+import { initSupabase, syncData, pushData, consolidateData } from './services/syncService';
+import { isCardDue } from './services/srsService';
 
 // Simple UUID generator
 const generateId = () => Math.random().toString(36).substr(2, 9) + '-' + Date.now().toString(36);
@@ -22,6 +23,125 @@ export default function App() {
   // Sync Status
   const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'saved' | 'error'>('idle');
   const [isConnected, setIsConnected] = useState(false);
+
+  // Notifications
+  const [notificationsEnabled, setNotificationsEnabled] = useState(false);
+  const [lastNotificationTime, setLastNotificationTime] = useState(0);
+
+  // Streak State
+  const [streak, setStreak] = useState(0);
+
+  useEffect(() => {
+    // Check initial permission on load
+    if ('Notification' in window && Notification.permission === 'granted') {
+      setNotificationsEnabled(true);
+    }
+    // Load streak
+    const savedStreak = parseInt(localStorage.getItem('tcf-streak') || '0', 10);
+    const lastDate = localStorage.getItem('tcf-last-study-date');
+    
+    // Check if streak is valid (yesterday or today)
+    if (lastDate) {
+        const today = new Date().toDateString();
+        const yesterday = new Date(Date.now() - 86400000).toDateString();
+        if (lastDate === today) {
+            setStreak(savedStreak);
+        } else if (lastDate === yesterday) {
+            setStreak(savedStreak);
+        } else {
+            // Broken streak
+            setStreak(0);
+            localStorage.setItem('tcf-streak', '0');
+        }
+    } else {
+        setStreak(0);
+    }
+  }, []);
+
+  const handleStudyActivity = () => {
+      const today = new Date().toDateString();
+      const lastDate = localStorage.getItem('tcf-last-study-date');
+
+      if (lastDate !== today) {
+          // Increment streak if not already studied today
+          let newStreak = 1;
+          // Check if extended from yesterday
+          const yesterday = new Date(Date.now() - 86400000).toDateString();
+          if (lastDate === yesterday) {
+              const current = parseInt(localStorage.getItem('tcf-streak') || '0', 10);
+              newStreak = current + 1;
+          }
+          
+          setStreak(newStreak);
+          localStorage.setItem('tcf-streak', newStreak.toString());
+          localStorage.setItem('tcf-last-study-date', today);
+      }
+  };
+
+  const handleNotificationToggle = async () => {
+    if (!('Notification' in window)) {
+      alert("This browser does not support desktop notifications");
+      return;
+    }
+
+    // 1. If currently enabled, disable it (logically)
+    if (notificationsEnabled) {
+      setNotificationsEnabled(false);
+      return;
+    }
+
+    // 2. If disabled, try to enable
+    try {
+      if (Notification.permission === 'granted') {
+        // Permission exists, just enable logic
+        setNotificationsEnabled(true);
+        new Notification("Study Reminders Active", { body: "We'll let you know when cards are due." });
+      } else if (Notification.permission === 'denied') {
+        // Permission was denied previously
+        alert("Notifications are blocked by your browser. Please click the lock icon in the URL bar to allow notifications for this site.");
+      } else {
+        // Request permission
+        const permission = await Notification.requestPermission();
+        if (permission === 'granted') {
+          setNotificationsEnabled(true);
+          new Notification("Study Reminders Enabled", { body: "We will notify you when cards are due!" });
+        }
+      }
+    } catch (error) {
+      console.error("Notification Error:", error);
+      alert("Could not enable notifications. You might be in a restricted environment (Incognito or Sandbox).");
+    }
+  };
+
+  // Notification Polling (Every 5 mins check, notify max once per hour)
+  useEffect(() => {
+    if (!notificationsEnabled) return;
+
+    const checkDue = () => {
+      const now = Date.now();
+      // Don't notify if notified in last 60 mins
+      if (now - lastNotificationTime < 60 * 60 * 1000) return;
+
+      let totalDue = 0;
+      data.forEach(cat => cat.units.forEach(u => {
+         totalDue += u.cards.filter(c => isCardDue(c)).length;
+      }));
+
+      if (totalDue > 0) {
+        // Double check permission before sending
+        if (Notification.permission === 'granted') {
+            new Notification("TCF Prep Reminder", {
+                body: `You have ${totalDue} cards due for review. Keep up the streak!`,
+                icon: '/favicon.ico'
+            });
+            setLastNotificationTime(now);
+        }
+      }
+    };
+
+    const interval = setInterval(checkDue, 5 * 60 * 1000); // Check every 5 mins
+    return () => clearInterval(interval);
+  }, [notificationsEnabled, data, lastNotificationTime]);
 
   // Persistence Loading & Auto-Sync
   useEffect(() => {
@@ -164,13 +284,60 @@ export default function App() {
       setData(prevData => {
           const newData = [...prevData];
           newData[catIdx].units.splice(unitIdx, 1);
-          
-          // Trigger Cloud Save
           triggerCloudSave(newData);
-          
           return newData;
       });
   }
+
+  // New handler for SRS updates
+  const handleUpdateCard = (cardId: string, updates: Partial<Flashcard>) => {
+      setData(prevData => {
+          const newData = [...prevData];
+          // Locate card (naive search since structure is nested)
+          for(const cat of newData) {
+              for (const unit of cat.units) {
+                  const cardIndex = unit.cards.findIndex(c => c.id === cardId);
+                  if (cardIndex !== -1) {
+                      unit.cards[cardIndex] = { ...unit.cards[cardIndex], ...updates };
+                      triggerCloudSave(newData);
+                      return newData;
+                  }
+              }
+          }
+          return newData;
+      });
+  };
+  
+  const handleExportCategory = (category: Category) => {
+      const exportItems: ImportItem[] = [];
+      category.units.forEach(unit => {
+          unit.cards.forEach(card => {
+              exportItems.push({
+                  category: category.name,
+                  unit: unit.name,
+                  front: card.front,
+                  back: card.back
+              });
+          });
+      });
+
+      const jsonString = JSON.stringify(exportItems, null, 2);
+      const blob = new Blob([jsonString], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `TCF_${category.name.replace(/[^a-z0-9]/gi, '_').toLowerCase()}_export.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+  };
+
+  // Helper to count due cards in a unit
+  const countDueCards = (cards: Flashcard[]) => {
+      return cards.filter(c => isCardDue(c)).length;
+  };
 
   // --- Renders ---
 
@@ -185,7 +352,19 @@ export default function App() {
         </div>
         
         <div className="flex gap-3">
-            {/* Smart Status Indicator / Button */}
+             <div className="flex items-center gap-1.5 px-3 py-3 bg-slate-800 rounded-lg border border-slate-700" title="Study Streak">
+                 <Flame className={`w-5 h-5 ${streak > 0 ? 'text-orange-500 fill-orange-500' : 'text-slate-600'}`} />
+                 <span className={`font-mono font-bold ${streak > 0 ? 'text-orange-400' : 'text-slate-500'}`}>{streak}</span>
+             </div>
+
+             <button 
+               onClick={handleNotificationToggle}
+               className={`p-3 rounded-lg border transition ${notificationsEnabled ? 'bg-indigo-900/50 border-indigo-500 text-indigo-300' : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-white'}`}
+               title={notificationsEnabled ? "Notifications Active" : "Enable Study Reminders"}
+             >
+                {notificationsEnabled ? <Bell className="w-5 h-5" /> : <BellOff className="w-5 h-5" />}
+             </button>
+
             <button
                 onClick={() => setIsSyncOpen(true)}
                 className={`
@@ -195,22 +374,12 @@ export default function App() {
                     : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-white hover:border-slate-500'
                   }
                 `}
-                title="Cloud Connection Settings"
             >
-                {/* Icon Logic */}
-                {!isConnected ? (
-                   <CloudOff className="w-5 h-5" />
-                ) : syncStatus === 'syncing' ? (
-                   <Loader2 className="w-5 h-5 animate-spin text-indigo-400" />
-                ) : syncStatus === 'saved' ? (
-                   <CheckCircle className="w-5 h-5 text-green-400" />
-                ) : syncStatus === 'error' ? (
-                    <Cloud className="w-5 h-5 text-red-400" />
-                ) : (
-                    <Cloud className="w-5 h-5 text-indigo-400" />
-                )}
-
-                {/* Text Logic */}
+                {!isConnected ? <CloudOff className="w-5 h-5" /> 
+                : syncStatus === 'syncing' ? <Loader2 className="w-5 h-5 animate-spin text-indigo-400" /> 
+                : syncStatus === 'saved' ? <CheckCircle className="w-5 h-5 text-green-400" />
+                : <Cloud className="w-5 h-5 text-indigo-400" />}
+                
                 <span className="hidden sm:inline text-sm">
                    {!isConnected ? "Connect Cloud" 
                     : syncStatus === 'syncing' ? "Saving..." 
@@ -221,7 +390,7 @@ export default function App() {
 
             <button 
               onClick={() => setIsImportOpen(true)}
-              className="bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-3 rounded-lg font-medium flex items-center gap-2 shadow-lg shadow-indigo-900/20 transition transform hover:scale-105"
+              className="bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-3 rounded-lg font-medium flex items-center gap-2 shadow-lg transition"
             >
             <Plus className="w-5 h-5" />
             Import
@@ -237,45 +406,64 @@ export default function App() {
                 <Layers className="w-5 h-5" />
               </div>
               <h2 className="text-lg font-bold text-white">{cat.name}</h2>
-              <span className="ml-auto text-xs font-mono text-slate-500 px-2 py-1 bg-slate-900 rounded">
-                {cat.units.reduce((acc, u) => acc + u.cards.length, 0)} cards
-              </span>
+              
+              <div className="ml-auto flex items-center gap-2">
+                 <button 
+                   onClick={() => handleExportCategory(cat)}
+                   className="p-1.5 text-slate-500 hover:text-white hover:bg-slate-700 rounded transition"
+                   title="Export to JSON"
+                 >
+                   <Download className="w-4 h-4" />
+                 </button>
+                 <span className="text-xs font-mono text-slate-500 px-2 py-1 bg-slate-900 rounded">
+                   {cat.units.reduce((acc, u) => acc + u.cards.length, 0)} cards
+                 </span>
+              </div>
             </div>
             
             <div className="flex-1 p-2 max-h-[300px] overflow-y-auto no-scrollbar">
               {cat.units.length === 0 ? (
                 <div className="h-full flex flex-col items-center justify-center text-slate-500 p-8 text-center text-sm">
-                  No units created yet. <br/> Use the Import button to add JSON data.
+                  No units created yet.
                 </div>
               ) : (
                 <div className="space-y-1">
-                  {cat.units.map((unit, unitIdx) => (
-                    <div 
-                      key={unit.id}
-                      onClick={() => handleUnitClick(cat.id, unit.id)}
-                      className="group flex items-center justify-between p-3 rounded-lg hover:bg-slate-700/50 cursor-pointer transition border border-transparent hover:border-slate-600"
-                    >
-                      <div className="flex items-center gap-3">
-                        <BookOpen className="w-4 h-4 text-slate-500 group-hover:text-indigo-400 transition" />
-                        <span className="text-slate-300 group-hover:text-white font-medium text-sm">
-                          {unit.name}
-                        </span>
+                  {cat.units.map((unit, unitIdx) => {
+                    const dueCount = countDueCards(unit.cards);
+                    return (
+                      <div 
+                        key={unit.id}
+                        onClick={() => handleUnitClick(cat.id, unit.id)}
+                        className="group flex items-center justify-between p-3 rounded-lg hover:bg-slate-700/50 cursor-pointer transition border border-transparent hover:border-slate-600"
+                      >
+                        <div className="flex items-center gap-3">
+                          <BookOpen className="w-4 h-4 text-slate-500 group-hover:text-indigo-400 transition" />
+                          <span className="text-slate-300 group-hover:text-white font-medium text-sm">
+                            {unit.name}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          {dueCount > 0 && (
+                              <div className="flex items-center gap-1 bg-orange-500/10 px-2 py-0.5 rounded text-orange-400 border border-orange-500/20" title="Cards due for review">
+                                  <Brain className="w-3 h-3" />
+                                  <span className="text-xs font-bold">{dueCount}</span>
+                              </div>
+                          )}
+                          <span className="text-xs text-slate-500 font-mono">
+                              {unit.cards.length}
+                          </span>
+                          <button 
+                              className="p-1 hover:text-red-400 text-slate-600 transition"
+                              onClick={(e) => handleDeleteUnit(e, catIdx, unitIdx)}
+                              title="Delete Unit"
+                          >
+                              <Trash2 className="w-3 h-3" />
+                          </button>
+                          <ChevronRight className="w-4 h-4 text-slate-600 group-hover:text-white transition" />
+                        </div>
                       </div>
-                      <div className="flex items-center gap-3">
-                        <span className="text-xs text-slate-500 font-mono">
-                            {unit.cards.length}
-                        </span>
-                        <button 
-                            className="p-1 hover:text-red-400 text-slate-600 transition"
-                            onClick={(e) => handleDeleteUnit(e, catIdx, unitIdx)}
-                            title="Delete Unit"
-                        >
-                            <Trash2 className="w-3 h-3" />
-                        </button>
-                        <ChevronRight className="w-4 h-4 text-slate-600 group-hover:text-white transition" />
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -304,6 +492,8 @@ export default function App() {
         title={`${category.name} - ${unit.name}`}
         onBack={() => setViewState(ViewState.HOME)}
         unitId={unit.id}
+        onUpdateCard={handleUpdateCard}
+        onStudyActivity={handleStudyActivity}
       />
     );
   };

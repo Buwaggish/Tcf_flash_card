@@ -1,8 +1,16 @@
+export interface SRSData {
+  interval: number; // Days between reviews
+  repetition: number; // Number of consecutive successful reviews
+  easeFactor: number; // Difficulty multiplier (starts at 2.5)
+  dueDate: number; // Timestamp (ms) when card is next due
+}
+
 export interface Flashcard {
   id: string;
-  front: string; // The question or prompt (e.g., English or Image description)
+  front: string; // The question or prompt
   back: string;  // The answer (French)
-  mastered: boolean;
+  mastered: boolean; // Kept for legacy/manual override
+  srs?: SRSData; // Optional for backward compatibility
 }
 
 export interface Unit {
