@@ -3,8 +3,9 @@ import { AppData, Category, Flashcard, ImportItem, ViewState } from './types';
 import { ImportModal } from './components/ImportModal';
 import { FlashcardView } from './components/FlashcardView';
 import { SyncModal } from './components/SyncModal';
+import { ConfirmModal } from './components/ConfirmModal';
 import { Plus, BookOpen, ChevronRight, Layers, Trash2, Cloud, Loader2, CheckCircle, CloudOff, Brain, Download, Bell, BellOff, Flame, Play, Clock } from 'lucide-react';
-import { initSupabase, syncData, pushData, consolidateData, saveStudyLog } from './services/syncService';
+import { initSupabase, syncData, pushData, consolidateData, saveStudyLog, fetchTodayStudyLog } from './services/syncService';
 import { isCardDue } from './services/srsService';
 
 // Simple UUID generator
@@ -31,19 +32,25 @@ export default function App() {
   // Streak & Timer
   const [streak, setStreak] = useState(0);
   const [todayStudyTime, setTodayStudyTime] = useState(0); // seconds
+  type ConfirmState = 
+    | { type: 'resetTimer' }
+    | { type: 'deleteUnit'; catIdx: number; unitIdx: number; unitName: string }
+    | { type: 'fixDuplicates' };
+  const [confirmState, setConfirmState] = useState<ConfirmState | null>(null);
 
   // --- TIMER LOGIC ---
   useEffect(() => {
       const today = new Date().toDateString();
       const savedDate = localStorage.getItem('tcf-study-date');
+      let initialTime = 0;
+
       if (savedDate === today) {
-          const savedTime = parseInt(localStorage.getItem('tcf-study-time') || '0', 10);
-          setTodayStudyTime(savedTime);
+          initialTime = parseInt(localStorage.getItem('tcf-study-time') || '0', 10);
       } else {
           localStorage.setItem('tcf-study-date', today);
           localStorage.setItem('tcf-study-time', '0');
-          setTodayStudyTime(0);
       }
+      setTodayStudyTime(initialTime);
 
       const interval = setInterval(() => {
           if (document.visibilityState === 'visible') {
@@ -63,6 +70,33 @@ export default function App() {
 
       return () => clearInterval(interval);
   }, []);
+
+  // Fetch Cloud Timer on Connect
+  useEffect(() => {
+      if (isConnected) {
+          const dateKey = new Date().toISOString().split('T')[0];
+          fetchTodayStudyLog(dateKey).then(cloudTime => {
+              setTodayStudyTime(prev => {
+                  const maxTime = Math.max(prev, cloudTime);
+                  if (maxTime > prev) {
+                      localStorage.setItem('tcf-study-time', maxTime.toString());
+                  }
+                  return maxTime;
+              });
+          });
+      }
+  }, [isConnected]);
+
+  const performResetTimer = () => {
+      setTodayStudyTime(0);
+      localStorage.setItem('tcf-study-time', '0');
+      const dateKey = new Date().toISOString().split('T')[0];
+      saveStudyLog(dateKey, 0);
+  };
+
+  const handleResetTimer = () => {
+      setConfirmState({ type: 'resetTimer' });
+  };
 
   const formatTime = (seconds: number) => {
       const h = Math.floor(seconds / 3600);
@@ -231,28 +265,33 @@ export default function App() {
   };
 
   const handleImport = (items: ImportItem[]) => {
+    const normalize = (text: string) => text.trim().toLowerCase();
+
     setData((prevData) => {
       const newData = [...prevData];
 
       items.forEach((item) => {
-        let category = newData.find(c => c.name.trim().toLowerCase() === item.category.trim().toLowerCase());
+        let category = newData.find(c => normalize(c.name) === normalize(item.category));
         if (!category) {
           category = { id: generateId(), name: item.category, units: [] };
           newData.push(category);
         }
 
-        let unit = category.units.find(u => u.name.trim().toLowerCase() === item.unit.trim().toLowerCase());
+        let unit = category.units.find(u => normalize(u.name) === normalize(item.unit));
         if (!unit) {
           unit = { id: generateId(), name: item.unit, cards: [] };
           category.units.push(unit);
         }
 
-        unit.cards.push({
-          id: generateId(),
-          front: item.front,
-          back: item.back,
-          mastered: false
-        });
+        const exists = unit.cards.some(c => normalize(c.front) === normalize(item.front) && normalize(c.back) === normalize(item.back));
+        if (!exists) {
+          unit.cards.push({
+            id: generateId(),
+            front: item.front,
+            back: item.back,
+            mastered: false
+          });
+        }
       });
       
       triggerCloudSave(newData);
@@ -273,15 +312,17 @@ export default function App() {
     setIsSyncOpen(false);
   };
 
-  const handleFixDuplicates = async () => {
-    if(!confirm("This will merge categories and units with the same name and remove duplicate cards. The result will be saved to your cloud. Continue?")) return;
-    
+  const performFixDuplicates = () => {
     setData(prev => {
       const cleaned = consolidateData(prev);
       triggerCloudSave(cleaned); 
       return cleaned;
     });
     alert("Duplicates fixed! Data has been cleaned.");
+  };
+
+  const handleFixDuplicates = () => {
+    setConfirmState({ type: 'fixDuplicates' });
   };
 
   const handleUnitClick = (categoryId: string, unitId: string) => {
@@ -292,29 +333,61 @@ export default function App() {
 
   const handleDeleteUnit = (e: React.MouseEvent, catIdx: number, unitIdx: number) => {
       e.stopPropagation();
-      if(!confirm("Are you sure you want to delete this unit and all its cards?")) return;
-      
-      setData(prevData => {
-          const newData = [...prevData];
-          newData[catIdx].units.splice(unitIdx, 1);
-          triggerCloudSave(newData);
-          return newData;
-      });
+      const unitName = data[catIdx]?.units[unitIdx]?.name || 'this unit';
+      setConfirmState({ type: 'deleteUnit', catIdx, unitIdx, unitName });
   }
+
+  const handleConfirmModalConfirm = () => {
+      if (!confirmState) return;
+      if (confirmState.type === 'resetTimer') {
+          performResetTimer();
+      } else if (confirmState.type === 'deleteUnit') {
+          setData(prevData => {
+              const newData = [...prevData];
+              if (newData[confirmState.catIdx]) {
+                  newData[confirmState.catIdx].units.splice(confirmState.unitIdx, 1);
+              }
+              triggerCloudSave(newData);
+              return newData;
+          });
+      } else if (confirmState.type === 'fixDuplicates') {
+          performFixDuplicates();
+      }
+      setConfirmState(null);
+  };
+
+  const handleConfirmModalCancel = () => setConfirmState(null);
 
   const handleUpdateCard = (cardId: string, updates: Partial<Flashcard>) => {
       setData(prevData => {
-          const newData = [...prevData];
-          for(const cat of newData) {
-              for (const unit of cat.units) {
-                  const cardIndex = unit.cards.findIndex(c => c.id === cardId);
-                  if (cardIndex !== -1) {
-                      unit.cards[cardIndex] = { ...unit.cards[cardIndex], ...updates };
-                      triggerCloudSave(newData);
-                      return newData;
-                  }
-              }
-          }
+          // Deep clone for safe nested updates
+          const newData = prevData.map(cat => ({
+              ...cat,
+              units: cat.units.map(unit => ({
+                  ...unit,
+                  cards: unit.cards.map(c => 
+                      c.id === cardId ? { ...c, ...updates } : c
+                  )
+              }))
+          }));
+          triggerCloudSave(newData);
+          return newData;
+      });
+  };
+
+  // --- DELETE CARD ---
+  const handleDeleteCard = (cardId: string) => {
+      setData(prevData => {
+          // Robust delete using map/filter to ensure new reference and deep update
+          const newData = prevData.map(cat => ({
+              ...cat,
+              units: cat.units.map(unit => ({
+                  ...unit,
+                  cards: unit.cards.filter(c => c.id !== cardId)
+              }))
+          }));
+          
+          triggerCloudSave(newData);
           return newData;
       });
   };
@@ -576,10 +649,41 @@ export default function App() {
         onBack={() => setViewState(ViewState.HOME)}
         unitId={unitIdForProgress}
         onUpdateCard={handleUpdateCard}
+        onDeleteCard={handleDeleteCard}
         onStudyActivity={handleStudyActivity}
+        todayStudyTime={todayStudyTime}
+        onResetTimer={handleResetTimer}
       />
     );
   };
+
+  const confirmContent = confirmState ? (() => {
+      switch (confirmState.type) {
+          case 'resetTimer':
+              return {
+                  title: "Reset Timer",
+                  message: "Reset today's study timer back to 0? This cannot be undone.",
+                  tone: 'danger' as const,
+                  confirmLabel: 'Reset Timer'
+              };
+          case 'deleteUnit':
+              return {
+                  title: "Delete Unit",
+                  message: `Delete "${confirmState.unitName}" and all its cards?`,
+                  tone: 'danger' as const,
+                  confirmLabel: 'Delete'
+              };
+          case 'fixDuplicates':
+              return {
+                  title: "Clean Duplicates",
+                  message: "Merge categories/units with the same name and remove duplicate cards. Proceed?",
+                  tone: 'info' as const,
+                  confirmLabel: 'Clean Now'
+              };
+          default:
+              return null;
+      }
+  })() : null;
 
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100 font-sans selection:bg-indigo-500/30">
@@ -600,6 +704,16 @@ export default function App() {
         isConnected={isConnected}
         onDisconnect={handleDisconnect}
         onFixDuplicates={handleFixDuplicates}
+      />
+      
+      <ConfirmModal 
+        open={!!confirmState}
+        title={confirmContent?.title || ''}
+        message={confirmContent?.message || ''}
+        confirmLabel={confirmContent?.confirmLabel}
+        tone={confirmContent?.tone}
+        onConfirm={handleConfirmModalConfirm}
+        onCancel={handleConfirmModalCancel}
       />
     </div>
   );
