@@ -363,17 +363,15 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
           setIsPlaying(true);
           cancelSpeech();
 
-          const playPromise = playAzureTTS(currentCard.back, azureRegion, azureKey);
-          await Promise.race([playPromise, wait(10000)]);
-
-          // Stop any lingering audio after the 10s window to avoid overlap
-          stopAzureTTS();
+          // Fire playback but don't await end; constrain to 10s window
+          playAzureTTS(currentCard.back, azureRegion, azureKey).catch(() => {});
+          await wait(10000);
+          stopAzureTTS(); // ensure it stops after 10s window
         } catch (err) {
           if ((err as DOMException)?.name !== 'AbortError') {
             console.error("Auto cloud playback error", err);
           }
-          autoRunActiveRef.current = false;
-          return;
+          // Continue to timing logic so loop finishes gracefully
         } finally {
           setIsPlaying(false);
         }
