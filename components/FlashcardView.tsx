@@ -356,13 +356,18 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
 
       const start = Date.now();
 
-      for (let i = 0; i < 3; i++) {
+      for (let i = 0; i < 2; i++) {
         if (cancelled || sessionId !== autoSessionRef.current) break;
 
         try {
           setIsPlaying(true);
           cancelSpeech();
-          await playAzureTTS(currentCard.back, azureRegion, azureKey);
+
+          const playPromise = playAzureTTS(currentCard.back, azureRegion, azureKey);
+          await Promise.race([playPromise, wait(10000)]);
+
+          // Stop any lingering audio after the 10s window to avoid overlap
+          stopAzureTTS();
         } catch (err) {
           if ((err as DOMException)?.name !== 'AbortError') {
             console.error("Auto cloud playback error", err);
@@ -374,9 +379,6 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
         }
 
         if (cancelled || sessionId !== autoSessionRef.current) break;
-        if (i < 2) {
-          await wait(10000); // 10s silence between plays
-        }
       }
 
       if (cancelled || sessionId !== autoSessionRef.current) {
