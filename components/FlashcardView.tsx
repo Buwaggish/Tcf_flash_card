@@ -30,6 +30,7 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
   const [excludedIds, setExcludedIds] = useState<Set<string>>(new Set());
   const [pendingConfirm, setPendingConfirm] = useState<{ type: 'snooze' | 'delete'; card: Flashcard } | null>(null);
   const autoTimerRef = useRef<number | null>(null);
+  const autoSessionRef = useRef(0); // prevents overlapping auto runs
 
   // Queue Init
   useEffect(() => {
@@ -316,10 +317,14 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
         clearTimeout(autoTimerRef.current);
         autoTimerRef.current = null;
       }
+      autoSessionRef.current += 1;
       return;
     }
 
     if (!currentCard || studyQueue.length === 0) return;
+
+    const sessionId = autoSessionRef.current + 1;
+    autoSessionRef.current = sessionId;
 
     if (autoTimerRef.current) {
       clearTimeout(autoTimerRef.current);
@@ -344,36 +349,41 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
       } else {
           setShowVoiceSettings(true);
           setShowAzureSettings(true);
+          return;
       }
 
-      if (cancelled) return;
+      if (cancelled || sessionId !== autoSessionRef.current) return;
 
-      autoTimerRef.current = window.setTimeout(() => {
-        if (cancelled) return;
-        const currentIndex = studyQueue.findIndex(c => c.id === currentCard.id);
-        const nextIndex = currentIndex + 1;
+      await new Promise<void>((resolve) => {
+        autoTimerRef.current = window.setTimeout(resolve, 60000);
+      });
 
-        if (nextIndex < studyQueue.length) {
-          setCurrentCard(studyQueue[nextIndex]);
-        } else {
-          setCurrentCard(null);
-          setSessionComplete(true);
-        }
-        setIsFlipped(false);
-      }, 60000);
+      if (cancelled || sessionId !== autoSessionRef.current) return;
+
+      const currentIndex = studyQueue.findIndex(c => c.id === currentCard.id);
+      const nextIndex = currentIndex + 1;
+
+      if (nextIndex < studyQueue.length) {
+        setCurrentCard(studyQueue[nextIndex]);
+      } else {
+        setCurrentCard(null);
+        setSessionComplete(true);
+      }
+      setIsFlipped(false);
     };
 
     runAutoDisplay();
 
     return () => {
       cancelled = true;
+      autoSessionRef.current += 1; // invalidate any pending run
       if (autoTimerRef.current) {
         clearTimeout(autoTimerRef.current);
         autoTimerRef.current = null;
       }
       cancelSpeech();
     };
-  }, [autoPreview, currentCard, studyQueue, azureRegion, azureKey]);
+  }, [autoPreview, currentCard?.id, studyQueue, azureRegion, azureKey]);
 
   useEffect(() => {
     if (viewMode !== 'study') return;
