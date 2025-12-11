@@ -362,10 +362,11 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
         try {
           setIsPlaying(true);
           cancelSpeech();
-          stopAzureTTS();
           await playAzureTTS(currentCard.back, azureRegion, azureKey);
         } catch (err) {
           console.error("Auto cloud playback error", err);
+          autoRunActiveRef.current = false;
+          return;
         } finally {
           setIsPlaying(false);
         }
