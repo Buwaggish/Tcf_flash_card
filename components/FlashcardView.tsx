@@ -342,9 +342,17 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
           return;
       }
 
+      const wait = async (ms: number) => {
+        await new Promise<void>((resolve) => {
+          autoTimerRef.current = window.setTimeout(resolve, ms);
+        });
+      };
+
       const start = Date.now();
 
-      while (!cancelled && sessionId === autoSessionRef.current) {
+      for (let i = 0; i < 3; i++) {
+        if (cancelled || sessionId !== autoSessionRef.current) break;
+
         try {
           setIsPlaying(true);
           cancelSpeech();
@@ -356,14 +364,17 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
         }
 
         if (cancelled || sessionId !== autoSessionRef.current) break;
+        if (i < 2) {
+          await wait(10000); // 10s silence between plays
+        }
+      }
 
-        const elapsed = Date.now() - start;
-        if (elapsed >= 60000) break;
+      if (cancelled || sessionId !== autoSessionRef.current) return;
 
-        const waitMs = Math.min(10000, 60000 - elapsed);
-        await new Promise<void>((resolve) => {
-          autoTimerRef.current = window.setTimeout(resolve, waitMs);
-        });
+      const elapsed = Date.now() - start;
+      const remaining = Math.max(0, 60000 - elapsed);
+      if (remaining > 0) {
+        await wait(remaining);
       }
 
       if (cancelled || sessionId !== autoSessionRef.current) return;
@@ -473,7 +484,7 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
 
       {autoPreview && (
          <div className="mb-3 px-4 py-2 bg-cyan-900/40 border border-cyan-500/40 rounded-lg text-sm text-cyan-100">
-            Auto display is running. Each card will cloud-read, pause 10s, repeat until 1 minute passes, then move on without changing progress.
+            Auto display is running. Each card will cloud-read 3 times with 10s silence between reads, then wait out the rest of 1 minute before moving on without changing progress.
          </div>
       )}
 
