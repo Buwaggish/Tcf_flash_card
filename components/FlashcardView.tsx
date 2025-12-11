@@ -336,7 +336,15 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
     const runAutoDisplay = async () => {
       setIsFlipped(true); // Keep answer visible while speaking
 
-      if (azureRegion && azureKey) {
+      if (!azureRegion || !azureKey) {
+          setShowVoiceSettings(true);
+          setShowAzureSettings(true);
+          return;
+      }
+
+      const start = Date.now();
+
+      while (!cancelled && sessionId === autoSessionRef.current) {
         try {
           setIsPlaying(true);
           cancelSpeech();
@@ -346,17 +354,17 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
         } finally {
           setIsPlaying(false);
         }
-      } else {
-          setShowVoiceSettings(true);
-          setShowAzureSettings(true);
-          return;
+
+        if (cancelled || sessionId !== autoSessionRef.current) break;
+
+        const elapsed = Date.now() - start;
+        if (elapsed >= 60000) break;
+
+        const waitMs = Math.min(10000, 60000 - elapsed);
+        await new Promise<void>((resolve) => {
+          autoTimerRef.current = window.setTimeout(resolve, waitMs);
+        });
       }
-
-      if (cancelled || sessionId !== autoSessionRef.current) return;
-
-      await new Promise<void>((resolve) => {
-        autoTimerRef.current = window.setTimeout(resolve, 60000);
-      });
 
       if (cancelled || sessionId !== autoSessionRef.current) return;
 
@@ -465,7 +473,7 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
 
       {autoPreview && (
          <div className="mb-3 px-4 py-2 bg-cyan-900/40 border border-cyan-500/40 rounded-lg text-sm text-cyan-100">
-            Auto display is running. Cards that are new or due will play with cloud voice and advance every 1 minute without changing progress.
+            Auto display is running. Each card will cloud-read, pause 10s, repeat until 1 minute passes, then move on without changing progress.
          </div>
       )}
 
