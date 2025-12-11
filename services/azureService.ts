@@ -1,3 +1,22 @@
+let currentAudio: HTMLAudioElement | null = null;
+let currentUrl: string | null = null;
+
+export const stopAzureTTS = () => {
+  if (currentAudio) {
+    try {
+      currentAudio.pause();
+      currentAudio.currentTime = 0;
+    } catch (e) {
+      console.error("Failed to stop Azure TTS", e);
+    }
+  }
+  if (currentUrl) {
+    URL.revokeObjectURL(currentUrl);
+  }
+  currentAudio = null;
+  currentUrl = null;
+};
+
 export const playAzureTTS = async (
   text: string,
   region: string,
@@ -38,14 +57,17 @@ export const playAzureTTS = async (
     const blob = await response.blob();
     const audioUrl = URL.createObjectURL(blob);
     const audio = new Audio(audioUrl);
+    stopAzureTTS();
+    currentAudio = audio;
+    currentUrl = audioUrl;
 
     return new Promise((resolve, reject) => {
         audio.onended = () => {
-            URL.revokeObjectURL(audioUrl);
+            stopAzureTTS();
             resolve();
         };
         audio.onerror = (e) => {
-            URL.revokeObjectURL(audioUrl);
+            stopAzureTTS();
             reject(new Error("Audio playback failed"));
         };
         

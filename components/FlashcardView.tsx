@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Flashcard } from '../types';
 import { getFrenchVoices, speak, cancelSpeech } from '../services/ttsService';
-import { playAzureTTS } from '../services/azureService';
+import { playAzureTTS, stopAzureTTS } from '../services/azureService';
 import { generateCardContext } from '../services/geminiService';
 import { calculateNextReview, getDueDateLabel, isCardDue, getCardStatusLabel, getCardPriority, INITIAL_SRS_DATA } from '../services/srsService';
 import { ConfirmModal } from './ConfirmModal';
@@ -362,6 +362,7 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
         try {
           setIsPlaying(true);
           cancelSpeech();
+          stopAzureTTS();
           await playAzureTTS(currentCard.back, azureRegion, azureKey);
         } catch (err) {
           console.error("Auto cloud playback error", err);
@@ -375,7 +376,10 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
         }
       }
 
-      if (cancelled || sessionId !== autoSessionRef.current) return;
+      if (cancelled || sessionId !== autoSessionRef.current) {
+        autoRunActiveRef.current = false;
+        return;
+      }
 
       const elapsed = Date.now() - start;
       const remaining = Math.max(0, 60000 - elapsed);
@@ -383,7 +387,10 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
         await wait(remaining);
       }
 
-      if (cancelled || sessionId !== autoSessionRef.current) return;
+      if (cancelled || sessionId !== autoSessionRef.current) {
+        autoRunActiveRef.current = false;
+        return;
+      }
 
       const currentIndex = studyQueue.findIndex(c => c.id === currentCard.id);
       const nextIndex = currentIndex + 1;
@@ -408,6 +415,7 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
         autoTimerRef.current = null;
       }
       cancelSpeech();
+      stopAzureTTS();
       autoRunActiveRef.current = false;
     };
   }, [autoPreview, currentCard?.id, studyQueue, azureRegion, azureKey]);
