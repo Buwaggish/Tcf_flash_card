@@ -331,6 +331,12 @@ export default function App() {
     setViewState(ViewState.STUDY);
   };
 
+  const handleAutoPreviewUnit = (categoryId: string, unitId: string) => {
+    setSelectedCategory(categoryId);
+    setSelectedUnit(unitId);
+    setViewState(ViewState.AUTO_PREVIEW);
+  };
+
   const handleDeleteUnit = (e: React.MouseEvent, catIdx: number, unitIdx: number) => {
       e.stopPropagation();
       const unitName = data[catIdx]?.units[unitIdx]?.name || 'this unit';
@@ -568,6 +574,14 @@ export default function App() {
                                       <span className="text-xs font-bold">{dueCount}</span>
                                   </div>
                               )}
+                              <button
+                                  className="flex items-center gap-1 px-2 py-1 text-xs rounded bg-cyan-600/20 text-cyan-200 border border-cyan-500/30 hover:bg-cyan-600/30 transition"
+                                  onClick={(e) => { e.stopPropagation(); handleAutoPreviewUnit(cat.id, unit.id); }}
+                                  title="Auto display due/new cards with cloud voice"
+                              >
+                                  <Play className="w-3 h-3" />
+                                  Auto
+                              </button>
                               <span className="text-xs text-slate-500 font-mono">
                                   {unit.cards.length}
                               </span>
@@ -609,6 +623,21 @@ export default function App() {
         }));
         title = "Review All Due Cards";
         unitIdForProgress = "review-all-session";
+    } else if (viewState === ViewState.AUTO_PREVIEW) {
+        const category = data.find(c => c.id === selectedCategory);
+        const unit = category?.units.find(u => u.id === selectedUnit);
+        if (category && unit) {
+            cardsToStudy = unit.cards.filter(isCardDue);
+            title = `${category.name} - ${unit.name} (Auto Display)`;
+            unitIdForProgress = unit.id;
+        } else {
+             return (
+                <div className="flex flex-col items-center justify-center h-screen">
+                    <p className="text-red-400">Unit not found or empty.</p>
+                    <button onClick={() => setViewState(ViewState.HOME)} className="mt-4 text-white underline">Go Home</button>
+                </div>
+              );
+        }
     } else {
         const category = data.find(c => c.id === selectedCategory);
         const unit = category?.units.find(u => u.id === selectedUnit);
@@ -642,6 +671,22 @@ export default function App() {
          );
     }
 
+    if (viewState === ViewState.AUTO_PREVIEW && cardsToStudy.length === 0) {
+         return (
+            <div className="flex flex-col items-center justify-center h-screen p-6 text-center">
+                <CheckCircle className="w-16 h-16 text-green-400 mb-4" />
+                <h2 className="text-2xl font-bold text-white mb-2">No New or Due Cards</h2>
+                <p className="text-slate-400 mb-8 max-w-md">Auto display only cycles cards that are new or currently due. This set has none right now.</p>
+                <button 
+                    onClick={() => setViewState(ViewState.HOME)}
+                    className="bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-3 rounded-lg font-medium shadow-lg transition"
+                >
+                    Back to Dashboard
+                </button>
+            </div>
+         );
+    }
+
     return (
       <FlashcardView 
         cards={cardsToStudy} 
@@ -649,10 +694,11 @@ export default function App() {
         onBack={() => setViewState(ViewState.HOME)}
         unitId={unitIdForProgress}
         onUpdateCard={handleUpdateCard}
-        onDeleteCard={handleDeleteCard}
-        onStudyActivity={handleStudyActivity}
+        onDeleteCard={viewState === ViewState.AUTO_PREVIEW ? undefined : handleDeleteCard}
+        onStudyActivity={viewState === ViewState.AUTO_PREVIEW ? undefined : handleStudyActivity}
         todayStudyTime={todayStudyTime}
         onResetTimer={handleResetTimer}
+        autoPreview={viewState === ViewState.AUTO_PREVIEW}
       />
     );
   };
@@ -688,7 +734,7 @@ export default function App() {
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100 font-sans selection:bg-indigo-500/30">
       {viewState === ViewState.HOME && renderHome()}
-      {(viewState === ViewState.STUDY || viewState === ViewState.STUDY_ALL) && renderStudy()}
+      {(viewState === ViewState.STUDY || viewState === ViewState.STUDY_ALL || viewState === ViewState.AUTO_PREVIEW) && renderStudy()}
       
       <ImportModal 
         isOpen={isImportOpen} 

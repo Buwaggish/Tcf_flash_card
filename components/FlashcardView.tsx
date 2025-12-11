@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Flashcard } from '../types';
 import { getFrenchVoices, speak, cancelSpeech } from '../services/ttsService';
 import { playAzureTTS } from '../services/azureService';
@@ -17,10 +17,11 @@ interface FlashcardViewProps {
   onStudyActivity?: () => void; 
   todayStudyTime?: number;
   onResetTimer?: () => void;
+  autoPreview?: boolean;
 }
 
 export const FlashcardView: React.FC<FlashcardViewProps> = ({ 
-  cards, title, onBack, unitId, onUpdateCard, onDeleteCard, onStudyActivity, todayStudyTime = 0, onResetTimer 
+  cards, title, onBack, unitId, onUpdateCard, onDeleteCard, onStudyActivity, todayStudyTime = 0, onResetTimer, autoPreview = false 
 }) => {
   const [viewMode, setViewMode] = useState<'study' | 'gallery'>('study');
   const [studyQueue, setStudyQueue] = useState<Flashcard[]>([]);
@@ -28,6 +29,7 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
   const [currentCard, setCurrentCard] = useState<Flashcard | null>(null);
   const [excludedIds, setExcludedIds] = useState<Set<string>>(new Set());
   const [pendingConfirm, setPendingConfirm] = useState<{ type: 'snooze' | 'delete'; card: Flashcard } | null>(null);
+  const autoTimerRef = useRef<number | null>(null);
 
   // Queue Init
   useEffect(() => {
@@ -61,6 +63,12 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
   useEffect(() => {
     setExcludedIds(new Set());
   }, [unitId]);
+
+  useEffect(() => {
+    if (autoPreview) {
+      setViewMode('study');
+    }
+  }, [autoPreview]);
 
   const [isFlipped, setIsFlipped] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -198,6 +206,7 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
 
   const handleRate = async (grade: 'again' | 'hard' | 'good' | 'easy', e?: React.MouseEvent) => {
     e?.stopPropagation();
+    if (autoPreview) return;
     if (!currentCard) return;
     onStudyActivity?.();
     const newSRS = calculateNextReview(currentCard.srs, grade);
@@ -231,12 +240,14 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
 
   const handleSnooze = (e: React.MouseEvent) => {
       e.stopPropagation();
+      if (autoPreview) return;
       if (!currentCard) return;
       setPendingConfirm({ type: 'snooze', card: currentCard });
   };
 
   const handleDelete = (e: React.MouseEvent) => {
       e.stopPropagation();
+      if (autoPreview) return;
       if (!currentCard || !onDeleteCard) return;
       setPendingConfirm({ type: 'delete', card: currentCard });
   };
@@ -300,6 +311,71 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
   };
 
   useEffect(() => {
+    if (!autoPreview) {
+      if (autoTimerRef.current) {
+        clearTimeout(autoTimerRef.current);
+        autoTimerRef.current = null;
+      }
+      return;
+    }
+
+    if (!currentCard || studyQueue.length === 0) return;
+
+    if (autoTimerRef.current) {
+      clearTimeout(autoTimerRef.current);
+      autoTimerRef.current = null;
+    }
+
+    let cancelled = false;
+
+    const runAutoDisplay = async () => {
+      setIsFlipped(true); // Keep answer visible while speaking
+
+      if (azureRegion && azureKey) {
+        try {
+          setIsPlaying(true);
+          cancelSpeech();
+          await playAzureTTS(currentCard.back, azureRegion, azureKey);
+        } catch (err) {
+          console.error("Auto cloud playback error", err);
+        } finally {
+          setIsPlaying(false);
+        }
+      } else {
+          setShowVoiceSettings(true);
+          setShowAzureSettings(true);
+      }
+
+      if (cancelled) return;
+
+      autoTimerRef.current = window.setTimeout(() => {
+        if (cancelled) return;
+        const currentIndex = studyQueue.findIndex(c => c.id === currentCard.id);
+        const nextIndex = currentIndex + 1;
+
+        if (nextIndex < studyQueue.length) {
+          setCurrentCard(studyQueue[nextIndex]);
+        } else {
+          setCurrentCard(null);
+          setSessionComplete(true);
+        }
+        setIsFlipped(false);
+      }, 60000);
+    };
+
+    runAutoDisplay();
+
+    return () => {
+      cancelled = true;
+      if (autoTimerRef.current) {
+        clearTimeout(autoTimerRef.current);
+        autoTimerRef.current = null;
+      }
+      cancelSpeech();
+    };
+  }, [autoPreview, currentCard, studyQueue, azureRegion, azureKey]);
+
+  useEffect(() => {
     if (viewMode !== 'study') return;
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement) return;
@@ -354,8 +430,20 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
         
         <div className="flex items-center gap-2 md:gap-4">
           <div className="flex bg-slate-800 rounded-lg p-1 border border-slate-700">
-             <button onClick={() => setViewMode('study')} className={`p-1.5 rounded-md transition ${viewMode === 'study' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}><Layers className="w-4 h-4" /></button>
-             <button onClick={() => setViewMode('gallery')} className={`p-1.5 rounded-md transition ${viewMode === 'gallery' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}><List className="w-4 h-4" /></button>
+             <button 
+               disabled={autoPreview}
+               onClick={() => !autoPreview && setViewMode('study')} 
+               className={`p-1.5 rounded-md transition ${viewMode === 'study' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-white'} ${autoPreview ? 'opacity-50 cursor-not-allowed' : ''}`}
+             >
+               <Layers className="w-4 h-4" />
+             </button>
+             <button 
+               disabled={autoPreview}
+               onClick={() => !autoPreview && setViewMode('gallery')} 
+               className={`p-1.5 rounded-md transition ${viewMode === 'gallery' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-white'} ${autoPreview ? 'opacity-50 cursor-not-allowed' : ''}`}
+             >
+               <List className="w-4 h-4" />
+             </button>
           </div>
           <div className="hidden md:flex items-center gap-2 px-3 py-1 bg-slate-800 rounded-full border border-slate-700">
              <Brain className={`w-4 h-4 ${isDue ? 'text-orange-400' : 'text-green-400'}`} />
@@ -364,6 +452,12 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
           <button onClick={() => setShowVoiceSettings(!showVoiceSettings)} className={`p-2 rounded-lg transition ${showVoiceSettings ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}><Settings className="w-5 h-5" /></button>
         </div>
       </div>
+
+      {autoPreview && (
+         <div className="mb-3 px-4 py-2 bg-cyan-900/40 border border-cyan-500/40 rounded-lg text-sm text-cyan-100">
+            Auto display is running. Cards that are new or due will play with cloud voice and advance every 1 minute without changing progress.
+         </div>
+      )}
 
       {showVoiceSettings && (
          <div className="mb-6 space-y-4 bg-slate-800 rounded-xl border border-slate-700 p-4 animate-in fade-in slide-in-from-top-2 shrink-0 max-h-[50vh] overflow-y-auto">
@@ -452,8 +546,12 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
             {(sessionComplete || !currentCard) ? (
                 <div className="flex-1 flex flex-col items-center justify-center p-6 text-center animate-in fade-in zoom-in-95">
                     <CheckCircle className="w-16 h-16 text-green-400 mb-4" />
-                    <h2 className="text-2xl font-bold text-white mb-2">You're all caught up!</h2>
-                    <p className="text-slate-400 mb-8 max-w-md">You have reviewed all cards currently due in this queue. Check back later or switch to Gallery Mode to see all words.</p>
+                    <h2 className="text-2xl font-bold text-white mb-2">{autoPreview ? 'Auto display finished' : "You're all caught up!"}</h2>
+                    <p className="text-slate-400 mb-8 max-w-md">
+                      {autoPreview 
+                        ? 'All new or due cards in this set have been previewed. No progress was recorded.'
+                        : 'You have reviewed all cards currently due in this queue. Check back later or switch to Gallery Mode to see all words.'}
+                    </p>
                     <button onClick={onBack} className="bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-3 rounded-lg font-medium shadow-lg shadow-indigo-500/20 transition">Back to Dashboard</button>
                 </div>
             ) : (
@@ -482,16 +580,22 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
                         <button onClick={(e) => handleCloudPlay(currentCard.back, e)} disabled={isPlaying || !azureKey} title="Play Cloud (O)" className={`p-3 rounded-full shadow-lg ${azureKey ? 'bg-cyan-600 hover:bg-cyan-500 text-white' : 'bg-slate-700 text-slate-400'}`}>{isPlaying ? <RefreshCw className="w-5 h-5 animate-spin" /> : <CloudLightning className="w-5 h-5" />}</button>
                         <button onClick={handleAiExplain} disabled={isGeneratingAi} className={`p-3 rounded-full shadow-lg transition ${isGeneratingAi ? 'bg-slate-600' : 'bg-violet-600 hover:bg-violet-500'} text-white`} title="Explain with AI">{isGeneratingAi ? <Loader2 className="w-5 h-5 animate-spin" /> : <Sparkles className="w-5 h-5" />}</button>
                         {isFrenchLong && <button onClick={(e) => handlePlaySequence(currentCard.back, e)} disabled={isPlaying} className="p-3 bg-slate-700 hover:bg-slate-600 rounded-full text-white shadow-lg" title="Slow Mode"><Play className="w-5 h-5" /></button>}
-                        <div className="w-full flex justify-center gap-4 mt-2 border-t border-white/10 pt-2">
-                            <button onClick={handleSnooze} className="text-slate-400 hover:text-indigo-300 text-xs flex items-center gap-1"><Moon className="w-3 h-3" /> Snooze 30d</button>
-                            <button onClick={handleDelete} className="text-slate-400 hover:text-red-400 text-xs flex items-center gap-1"><Trash2 className="w-3 h-3" /> Delete</button>
-                        </div>
+                        {!autoPreview && (
+                          <div className="w-full flex justify-center gap-4 mt-2 border-t border-white/10 pt-2">
+                              <button onClick={handleSnooze} className="text-slate-400 hover:text-indigo-300 text-xs flex items-center gap-1"><Moon className="w-3 h-3" /> Snooze 30d</button>
+                              <button onClick={handleDelete} className="text-slate-400 hover:text-red-400 text-xs flex items-center gap-1"><Trash2 className="w-3 h-3" /> Delete</button>
+                          </div>
+                        )}
                         </div>
                     </div>
                     </div>
                 </div>
                 <div className="h-[80px] shrink-0">
-                    {isFlipped ? (
+                    {autoPreview ? (
+                        <div className="h-full flex items-center justify-center text-cyan-100 text-sm bg-cyan-900/10 border border-cyan-500/20 rounded-lg">
+                            Auto display will advance after 1 minute per card. Progress is not recorded.
+                        </div>
+                    ) : isFlipped ? (
                         <div className="grid grid-cols-4 gap-2 md:gap-4 h-full">
                             <button onClick={(e) => handleRate('again', e)} className="flex flex-col items-center justify-center bg-red-500/20 hover:bg-red-500/40 border border-red-500/50 rounded-xl transition" title="Press Q or 1"><span className="text-xs text-red-300 font-bold uppercase mb-1">Again</span><span className="text-xs text-red-200 opacity-60">{nextAgain ? getDueDateLabel(nextAgain.dueDate) : '-'}</span></button>
                             <button onClick={(e) => handleRate('hard', e)} className="flex flex-col items-center justify-center bg-orange-500/20 hover:bg-orange-500/40 border border-orange-500/50 rounded-xl transition" title="Press W or 2"><span className="text-xs text-orange-300 font-bold uppercase mb-1">Hard</span><span className="text-xs text-orange-200 opacity-60">{nextHard ? getDueDateLabel(nextHard.dueDate) : '-'}</span></button>
