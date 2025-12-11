@@ -21,8 +21,11 @@ export const stopAzureTTS = () => {
     }
   }
 
+  // Signal an abort to any waiter so it doesn't treat this as a completion
   if (currentReject) {
-    currentReject(new DOMException("Playback stopped", "AbortError"));
+    const rejectFn = currentReject;
+    currentReject = null;
+    rejectFn(new DOMException("Playback stopped", "AbortError"));
   }
 
   clearAudio();
@@ -67,7 +70,7 @@ export const playAzureTTS = async (
   const audioUrl = URL.createObjectURL(blob);
   const audio = new Audio(audioUrl);
 
-  // Reset any previous audio without force-resolving waits
+  // Reset any previous audio without forcing rejection
   clearAudio();
   currentAudio = audio;
   currentUrl = audioUrl;
