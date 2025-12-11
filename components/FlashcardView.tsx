@@ -31,6 +31,7 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
   const [pendingConfirm, setPendingConfirm] = useState<{ type: 'snooze' | 'delete'; card: Flashcard } | null>(null);
   const autoTimerRef = useRef<number | null>(null);
   const autoSessionRef = useRef(0); // prevents overlapping auto runs
+  const autoRunActiveRef = useRef(false);
 
   // Queue Init
   useEffect(() => {
@@ -318,10 +319,14 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
         autoTimerRef.current = null;
       }
       autoSessionRef.current += 1;
+      autoRunActiveRef.current = false;
       return;
     }
 
     if (!currentCard || studyQueue.length === 0) return;
+
+    if (autoRunActiveRef.current) return;
+    autoRunActiveRef.current = true;
 
     const sessionId = autoSessionRef.current + 1;
     autoSessionRef.current = sessionId;
@@ -339,6 +344,7 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
       if (!azureRegion || !azureKey) {
           setShowVoiceSettings(true);
           setShowAzureSettings(true);
+          autoRunActiveRef.current = false;
           return;
       }
 
@@ -389,6 +395,7 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
         setSessionComplete(true);
       }
       setIsFlipped(false);
+      autoRunActiveRef.current = false;
     };
 
     runAutoDisplay();
@@ -401,6 +408,7 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
         autoTimerRef.current = null;
       }
       cancelSpeech();
+      autoRunActiveRef.current = false;
     };
   }, [autoPreview, currentCard?.id, studyQueue, azureRegion, azureKey]);
 
