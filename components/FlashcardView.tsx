@@ -363,10 +363,9 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
           setIsPlaying(true);
           cancelSpeech();
 
-          // Fire playback but don't await end; constrain to 10s window
+          // Fire playback, then just wait 10s before the next trigger
           playAzureTTS(currentCard.back, azureRegion, azureKey).catch(() => {});
           await wait(10000);
-          stopAzureTTS(); // ensure it stops after 10s window
         } catch (err) {
           if ((err as DOMException)?.name !== 'AbortError') {
             console.error("Auto cloud playback error", err);
