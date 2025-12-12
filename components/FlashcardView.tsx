@@ -32,6 +32,7 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
   const autoTimerRef = useRef<number | null>(null);
   const autoSessionRef = useRef(0); // prevents overlapping auto runs
   const autoRunActiveRef = useRef(false);
+  const autoTimeoutsRef = useRef<number[]>([]);
 
   // Queue Init
   useEffect(() => {
@@ -336,9 +337,13 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
       autoTimerRef.current = null;
     }
 
+    // Clear any lingering timers before starting new run
+    autoTimeoutsRef.current.forEach(id => clearTimeout(id));
+    autoTimeoutsRef.current = [];
+
     let cancelled = false;
 
-    const runAutoDisplay = async () => {
+    const runAutoDisplay = () => {
       setIsFlipped(true); // Keep answer visible while speaking
 
       if (!azureRegion || !azureKey) {
@@ -348,63 +353,50 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
           return;
       }
 
-      const wait = async (ms: number) => {
-        await new Promise<void>((resolve) => {
-          autoTimerRef.current = window.setTimeout(resolve, ms);
-        });
+      const schedule = (delay: number, fn: () => void) => {
+        const id = window.setTimeout(fn, delay);
+        autoTimeoutsRef.current.push(id);
       };
 
-      const start = Date.now();
-
-      for (let i = 0; i < 2; i++) {
-        if (cancelled || sessionId !== autoSessionRef.current) break;
-
+      const playOnce = async () => {
+        if (cancelled || sessionId !== autoSessionRef.current) return;
         try {
           setIsPlaying(true);
           cancelSpeech();
-
-          // Fire playback, then just wait 10s before the next trigger
-          playAzureTTS(currentCard.back, azureRegion, azureKey).catch(() => {});
-          await wait(10000);
+          stopAzureTTS({ silent: true });
+          await playAzureTTS(currentCard.back, azureRegion, azureKey);
         } catch (err) {
           if ((err as DOMException)?.name !== 'AbortError') {
             console.error("Auto cloud playback error", err);
           }
-          // Continue to timing logic so loop finishes gracefully
         } finally {
           setIsPlaying(false);
         }
+      };
 
-        if (cancelled || sessionId !== autoSessionRef.current) break;
-      }
+      // Two plays: immediately and after 10s
+      schedule(0, playOnce);
+      schedule(10000, playOnce);
 
-      if (cancelled || sessionId !== autoSessionRef.current) {
+      // Advance after full minute
+      schedule(60000, () => {
+        if (cancelled || sessionId !== autoSessionRef.current) {
+          autoRunActiveRef.current = false;
+          return;
+        }
+        stopAzureTTS({ silent: true });
+        const currentIndex = studyQueue.findIndex(c => c.id === currentCard.id);
+        const nextIndex = currentIndex + 1;
+
+        if (nextIndex < studyQueue.length) {
+          setCurrentCard(studyQueue[nextIndex]);
+        } else {
+          setCurrentCard(null);
+          setSessionComplete(true);
+        }
+        setIsFlipped(false);
         autoRunActiveRef.current = false;
-        return;
-      }
-
-      const elapsed = Date.now() - start;
-      const remaining = Math.max(0, 60000 - elapsed);
-      if (remaining > 0) {
-        await wait(remaining);
-      }
-
-      if (cancelled || sessionId !== autoSessionRef.current) {
-        autoRunActiveRef.current = false;
-        return;
-      }
-
-      const currentIndex = studyQueue.findIndex(c => c.id === currentCard.id);
-      const nextIndex = currentIndex + 1;
-
-      if (nextIndex < studyQueue.length) {
-        setCurrentCard(studyQueue[nextIndex]);
-      } else {
-        setCurrentCard(null);
-        setSessionComplete(true);
-      }
-      setIsFlipped(false);
-      autoRunActiveRef.current = false;
+      });
     };
 
     runAutoDisplay();
@@ -412,15 +404,17 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
     return () => {
       cancelled = true;
       autoSessionRef.current += 1; // invalidate any pending run
+      autoTimeoutsRef.current.forEach(id => clearTimeout(id));
+      autoTimeoutsRef.current = [];
       if (autoTimerRef.current) {
         clearTimeout(autoTimerRef.current);
         autoTimerRef.current = null;
       }
       cancelSpeech();
-      stopAzureTTS();
+      stopAzureTTS({ silent: true });
       autoRunActiveRef.current = false;
     };
-  }, [autoPreview, currentCard?.id, studyQueue, azureRegion, azureKey]);
+  }, [autoPreview, currentCard?.id, azureRegion, azureKey]);
 
   useEffect(() => {
     if (viewMode !== 'study') return;
