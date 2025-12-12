@@ -502,7 +502,7 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
 
       {autoPreview && (
          <div className="mb-3 px-4 py-2 bg-cyan-900/40 border border-cyan-500/40 rounded-lg text-sm text-cyan-100">
-            Auto display is running. Each card will cloud-read 3 times with 10s silence between reads, then wait out the rest of 1 minute before moving on without changing progress.
+            Auto display is running. Each card will cloud-read twice with 10s between, then wait the rest of 1 minute before moving on without changing progress.
          </div>
       )}
 

@@ -11,7 +11,7 @@ const clearAudio = () => {
   currentReject = null;
 };
 
-export const stopAzureTTS = () => {
+export const stopAzureTTS = (options?: { silent?: boolean }) => {
   if (currentAudio) {
     try {
       currentAudio.pause();
@@ -22,7 +22,7 @@ export const stopAzureTTS = () => {
   }
 
   // Signal an abort to any waiter so it doesn't treat this as a completion
-  if (currentReject) {
+  if (!options?.silent && currentReject) {
     const rejectFn = currentReject;
     currentReject = null;
     rejectFn(new DOMException("Playback stopped", "AbortError"));
@@ -70,7 +70,8 @@ export const playAzureTTS = async (
   const audioUrl = URL.createObjectURL(blob);
   const audio = new Audio(audioUrl);
 
-  // Reset any previous audio without forcing rejection
+  // Stop any existing playback quietly before starting a new one
+  stopAzureTTS({ silent: true });
   clearAudio();
   currentAudio = audio;
   currentUrl = audioUrl;
