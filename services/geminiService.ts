@@ -61,13 +61,14 @@ export const generateCardContext = async (term: string, apiKey: string): Promise
 
   try {
     const prompt = `
-      You are a French tutor preparing a student for the TCF Canada exam.
-      Explain the term/phrase: "${term}".
-      
-      Output format (Keep it brief, max 80 words):
-      1. Definition (in French, simple)
-      2. Example Sentence (in French, relevant to immigration/daily life context)
-      3. Chinese Translation of the term and the sentence.
+You are a professional French instructor specializing in TCF-Canada exam preparation.
+
+Explain the French term or expression: “${term}”.
+
+Response requirements (maximum 80 words total):
+	1.	Definition — clear and simple French, suitable for B1–B2 level
+	2.	Example sentence — highly likely to appear in a TCF-Canada exam context (immigration, work, housing, healthcare, daily administration in Canada)
+	3.	Chinese translation — translate both the term and the example sentence into Chinese
     `;
 
     const response = await ai.models.generateContent({
