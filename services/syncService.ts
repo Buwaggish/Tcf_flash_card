@@ -174,6 +174,37 @@ export const syncData = async (localData: AppData): Promise<{ success: boolean; 
   }
 };
 
+// Pulls remote without pushing; prefers cloud data when present.
+export const pullData = async (localData: AppData): Promise<{ success: boolean; data?: AppData; error?: string }> => {
+  if (!supabase) return { success: false, error: "Not connected" };
+
+  try {
+    const { data: remoteRows, error: fetchError } = await supabase
+      .from(TABLE_NAME)
+      .select('content')
+      .eq('id', ROW_ID)
+      .single();
+
+    if (fetchError && fetchError.code !== 'PGRST116') {
+      throw fetchError;
+    }
+
+    let finalData = localData;
+    let remoteData: AppData = [];
+
+    if (remoteRows && remoteRows.content) {
+      remoteData = remoteRows.content as AppData;
+      const remoteHasItems = getCardCount(remoteData) > 0;
+      finalData = remoteHasItems ? remoteData : localData;
+    }
+
+    return { success: true, data: finalData };
+  } catch (err: any) {
+    console.error("Pull Error:", err);
+    return { success: false, error: err.message || "Unknown pull error" };
+  }
+};
+
 export const pushData = async (data: AppData): Promise<{ success: boolean; error?: string }> => {
   if (!supabase) return { success: false, error: "Not connected" };
   try {

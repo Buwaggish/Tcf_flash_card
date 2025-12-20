@@ -5,7 +5,7 @@ import { FlashcardView } from './components/FlashcardView';
 import { SyncModal } from './components/SyncModal';
 import { ConfirmModal } from './components/ConfirmModal';
 import { Plus, BookOpen, ChevronRight, Layers, Trash2, Cloud, Loader2, CheckCircle, CloudOff, Brain, Download, Bell, BellOff, Flame, Play, Clock } from 'lucide-react';
-import { initSupabase, syncData, pushData, consolidateData, saveStudyLog, fetchTodayStudyLog } from './services/syncService';
+import { initSupabase, syncData, pullData, pushData, consolidateData, saveStudyLog, fetchTodayStudyLog } from './services/syncService';
 import { isCardDue } from './services/srsService';
 
 // Simple UUID generator
@@ -231,7 +231,7 @@ export default function App() {
         if (initSupabase({ url, key })) {
              setIsConnected(true);
              setSyncStatus('syncing');
-             syncData(localData).then((result) => {
+             pullData(localData).then((result) => {
                  if (result.success && result.data) {
                      setData(result.data);
                      setSyncStatus('saved');
