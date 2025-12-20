@@ -490,51 +490,52 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
              <Brain className={`w-4 h-4 ${isDue ? 'text-orange-400' : 'text-green-400'}`} />
              <span className="text-slate-300 text-xs font-mono">{studyQueue.length} Queue</span>
           </div>
-          <button onClick={() => setShowVoiceSettings(!showVoiceSettings)} className={`p-2 rounded-lg transition ${showVoiceSettings ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}><Settings className="w-5 h-5" /></button>
+          <div className="relative">
+            <button onClick={() => setShowVoiceSettings(!showVoiceSettings)} className={`p-2 rounded-lg transition ${showVoiceSettings ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}><Settings className="w-5 h-5" /></button>
+            {showVoiceSettings && (
+               <div className="absolute right-0 mt-2 w-[90vw] max-w-sm md:w-96 space-y-4 bg-slate-800 rounded-xl border border-slate-700 p-4 animate-in fade-in slide-in-from-top-2 z-20 max-h-[60vh] overflow-y-auto shadow-2xl">
+                  <div className="flex flex-col gap-2">
+                  <label className="text-xs font-bold text-slate-400 uppercase tracking-widest">Local Voice</label>
+                  <div className="flex gap-2">
+                      <select value={selectedVoiceName} onChange={handleVoiceChange} className="flex-1 bg-slate-900 border border-slate-700 text-slate-200 text-sm rounded-lg p-2.5">
+                          {voices.map((v) => <option key={v.name} value={v.name}>{v.name} ({v.lang})</option>)}
+                      </select>
+                  </div>
+                  </div>
+                  <div className="border-t border-slate-700 pt-4">
+                       <div className="flex justify-between mb-2">
+                           <label className="text-xs font-bold text-indigo-400 uppercase tracking-widest flex items-center gap-2"><CloudLightning className="w-3 h-3" /> Azure Cloud</label>
+                           <button onClick={() => setShowAzureSettings(!showAzureSettings)} className="text-xs text-slate-400 underline">Config</button>
+                       </div>
+                       {showAzureSettings && (
+                           <div className="grid grid-cols-2 gap-3 mb-2 bg-slate-900/30 p-2 rounded">
+                              <input placeholder="Region" value={azureRegion} onChange={e => setAzureRegion(e.target.value)} className="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-white" />
+                              <input type="password" placeholder="Key" value={azureKey} onChange={e => setAzureKey(e.target.value)} className="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-white" />
+                              <button onClick={handleAzureSave} className="col-span-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs py-1 rounded flex items-center justify-center gap-1"><Save className="w-3 h-3" /> Save Azure</button>
+                           </div>
+                       )}
+                  </div>
+                  <div className="border-t border-slate-700 pt-4">
+                      <div className="flex justify-between mb-2">
+                           <label className="text-xs font-bold text-violet-400 uppercase tracking-widest flex items-center gap-2"><Sparkles className="w-3 h-3" /> Google Gemini</label>
+                           <button onClick={() => setShowGoogleSettings(!showGoogleSettings)} className="text-xs text-slate-400 underline">Config</button>
+                      </div>
+                       {showGoogleSettings && (
+                           <div className="flex flex-col gap-2 bg-slate-900/30 p-2 rounded">
+                              <div className="flex gap-2"><Key className="w-4 h-4 text-slate-500" /><input type="password" placeholder="Gemini API Key" value={googleKey} onChange={e => setGoogleKey(e.target.value)} className="flex-1 bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-white" /></div>
+                              <button onClick={handleGoogleSave} className="w-full bg-violet-600 hover:bg-violet-500 text-white text-xs py-1 rounded flex items-center justify-center gap-1"><Save className="w-3 h-3" /> Save Key</button>
+                           </div>
+                       )}
+                  </div>
+               </div>
+            )}
+          </div>
         </div>
       </div>
 
       {autoPreview && (
          <div className="mb-3 px-4 py-2 bg-cyan-900/40 border border-cyan-500/40 rounded-lg text-sm text-cyan-100">
             Auto display is running. Each card will cloud-read twice with 10s between, then wait the rest of 1 minute before moving on without changing progress.
-         </div>
-      )}
-
-      {showVoiceSettings && (
-         <div className="mb-6 space-y-4 bg-slate-800 rounded-xl border border-slate-700 p-4 animate-in fade-in slide-in-from-top-2 shrink-0 max-h-[50vh] overflow-y-auto">
-            <div className="flex flex-col gap-2">
-            <label className="text-xs font-bold text-slate-400 uppercase tracking-widest">Local Voice</label>
-            <div className="flex gap-2">
-                <select value={selectedVoiceName} onChange={handleVoiceChange} className="flex-1 bg-slate-900 border border-slate-700 text-slate-200 text-sm rounded-lg p-2.5">
-                    {voices.map((v) => <option key={v.name} value={v.name}>{v.name} ({v.lang})</option>)}
-                </select>
-            </div>
-            </div>
-            <div className="border-t border-slate-700 pt-4">
-                 <div className="flex justify-between mb-2">
-                     <label className="text-xs font-bold text-indigo-400 uppercase tracking-widest flex items-center gap-2"><CloudLightning className="w-3 h-3" /> Azure Cloud</label>
-                     <button onClick={() => setShowAzureSettings(!showAzureSettings)} className="text-xs text-slate-400 underline">Config</button>
-                 </div>
-                 {showAzureSettings && (
-                     <div className="grid grid-cols-2 gap-3 mb-2 bg-slate-900/30 p-2 rounded">
-                        <input placeholder="Region" value={azureRegion} onChange={e => setAzureRegion(e.target.value)} className="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-white" />
-                        <input type="password" placeholder="Key" value={azureKey} onChange={e => setAzureKey(e.target.value)} className="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-white" />
-                        <button onClick={handleAzureSave} className="col-span-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs py-1 rounded flex items-center justify-center gap-1"><Save className="w-3 h-3" /> Save Azure</button>
-                     </div>
-                 )}
-            </div>
-            <div className="border-t border-slate-700 pt-4">
-                <div className="flex justify-between mb-2">
-                     <label className="text-xs font-bold text-violet-400 uppercase tracking-widest flex items-center gap-2"><Sparkles className="w-3 h-3" /> Google Gemini</label>
-                     <button onClick={() => setShowGoogleSettings(!showGoogleSettings)} className="text-xs text-slate-400 underline">Config</button>
-                 </div>
-                 {showGoogleSettings && (
-                     <div className="flex flex-col gap-2 bg-slate-900/30 p-2 rounded">
-                        <div className="flex gap-2"><Key className="w-4 h-4 text-slate-500" /><input type="password" placeholder="Gemini API Key" value={googleKey} onChange={e => setGoogleKey(e.target.value)} className="flex-1 bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-white" /></div>
-                        <button onClick={handleGoogleSave} className="w-full bg-violet-600 hover:bg-violet-500 text-white text-xs py-1 rounded flex items-center justify-center gap-1"><Save className="w-3 h-3" /> Save Key</button>
-                     </div>
-                 )}
-            </div>
          </div>
       )}
 
