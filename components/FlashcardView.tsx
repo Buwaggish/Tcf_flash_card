@@ -607,26 +607,30 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
                     </div>
                     {/* Back */}
                     <div className="absolute inset-0 backface-hidden rotate-y-180 bg-indigo-900/20 border-2 border-indigo-500/30 rounded-2xl shadow-2xl flex flex-col items-center justify-center p-8 backdrop-blur-sm">
-                        {aiExplanation && (
-                            <div className="absolute top-0 left-0 right-0 bg-slate-900/95 p-4 z-10 rounded-t-xl border-b border-indigo-500/30 text-left overflow-y-auto max-h-[160px] animate-in slide-in-from-top-2" onClick={e => e.stopPropagation()}>
-                                <p className="text-xs font-bold text-indigo-400 uppercase mb-1">AI Context</p>
-                                <div className="text-sm text-slate-200 whitespace-pre-wrap">{aiExplanation}</div>
+                        <div className="w-full h-full flex flex-col">
+                            {aiExplanation && (
+                                <div className="bg-slate-900/95 p-4 rounded-xl border border-indigo-500/30 text-left overflow-y-auto max-h-[160px] animate-in slide-in-from-top-2" onClick={e => e.stopPropagation()}>
+                                    <p className="text-xs font-bold text-indigo-400 uppercase mb-1">AI Context</p>
+                                    <div className="text-sm text-slate-200 whitespace-pre-wrap">{aiExplanation}</div>
+                                </div>
+                            )}
+                            <div className={`flex-1 w-full flex flex-col items-center ${aiExplanation ? 'mt-4' : ''}`}>
+                                <span className="text-xs font-bold text-indigo-400 uppercase tracking-widest mb-4">Réponse</span>
+                                <p className="text-2xl md:text-3xl text-center font-medium text-white leading-relaxed overflow-y-auto max-h-[40%] mb-4">{currentCard.back}</p>
+                                
+                                <div className="mt-auto flex flex-wrap justify-center gap-3 pt-4 border-t border-white/10 w-full" onClick={(e) => e.stopPropagation()}>
+                                <button onClick={(e) => handlePlayAudio(currentCard.back, e)} disabled={isPlaying} title="Play Local (P)" className="p-3 bg-indigo-600 hover:bg-indigo-500 rounded-full text-white shadow-lg">{isPlaying && !isFrenchLong ? <RefreshCw className="w-5 h-5 animate-spin" /> : <Volume2 className="w-5 h-5" />}</button>
+                                <button onClick={(e) => handleCloudPlay(currentCard.back, e)} disabled={isPlaying || !azureKey} title="Play Cloud (O)" className={`p-3 rounded-full shadow-lg ${azureKey ? 'bg-cyan-600 hover:bg-cyan-500 text-white' : 'bg-slate-700 text-slate-400'}`}>{isPlaying ? <RefreshCw className="w-5 h-5 animate-spin" /> : <CloudLightning className="w-5 h-5" />}</button>
+                                <button onClick={handleAiExplain} disabled={isGeneratingAi} className={`p-3 rounded-full shadow-lg transition ${isGeneratingAi ? 'bg-slate-600' : 'bg-violet-600 hover:bg-violet-500'} text-white`} title="Explain with AI">{isGeneratingAi ? <Loader2 className="w-5 h-5 animate-spin" /> : <Sparkles className="w-5 h-5" />}</button>
+                                {isFrenchLong && <button onClick={(e) => handlePlaySequence(currentCard.back, e)} disabled={isPlaying} className="p-3 bg-slate-700 hover:bg-slate-600 rounded-full text-white shadow-lg" title="Slow Mode"><Play className="w-5 h-5" /></button>}
+                                {!autoPreview && (
+                                  <div className="w-full flex justify-center gap-4 mt-2 border-t border-white/10 pt-2">
+                                      <button onClick={handleSnooze} className="text-slate-400 hover:text-indigo-300 text-xs flex items-center gap-1"><Moon className="w-3 h-3" /> Snooze 30d</button>
+                                      <button onClick={handleDelete} className="text-slate-400 hover:text-red-400 text-xs flex items-center gap-1"><Trash2 className="w-3 h-3" /> Delete</button>
+                                  </div>
+                                )}
+                                </div>
                             </div>
-                        )}
-                        <span className="text-xs font-bold text-indigo-400 uppercase tracking-widest mb-4 mt-4">Réponse</span>
-                        <p className="text-2xl md:text-3xl text-center font-medium text-white leading-relaxed overflow-y-auto max-h-[40%] mb-4">{currentCard.back}</p>
-                        
-                        <div className="mt-auto flex flex-wrap justify-center gap-3 pt-4 border-t border-white/10 w-full" onClick={(e) => e.stopPropagation()}>
-                        <button onClick={(e) => handlePlayAudio(currentCard.back, e)} disabled={isPlaying} title="Play Local (P)" className="p-3 bg-indigo-600 hover:bg-indigo-500 rounded-full text-white shadow-lg">{isPlaying && !isFrenchLong ? <RefreshCw className="w-5 h-5 animate-spin" /> : <Volume2 className="w-5 h-5" />}</button>
-                        <button onClick={(e) => handleCloudPlay(currentCard.back, e)} disabled={isPlaying || !azureKey} title="Play Cloud (O)" className={`p-3 rounded-full shadow-lg ${azureKey ? 'bg-cyan-600 hover:bg-cyan-500 text-white' : 'bg-slate-700 text-slate-400'}`}>{isPlaying ? <RefreshCw className="w-5 h-5 animate-spin" /> : <CloudLightning className="w-5 h-5" />}</button>
-                        <button onClick={handleAiExplain} disabled={isGeneratingAi} className={`p-3 rounded-full shadow-lg transition ${isGeneratingAi ? 'bg-slate-600' : 'bg-violet-600 hover:bg-violet-500'} text-white`} title="Explain with AI">{isGeneratingAi ? <Loader2 className="w-5 h-5 animate-spin" /> : <Sparkles className="w-5 h-5" />}</button>
-                        {isFrenchLong && <button onClick={(e) => handlePlaySequence(currentCard.back, e)} disabled={isPlaying} className="p-3 bg-slate-700 hover:bg-slate-600 rounded-full text-white shadow-lg" title="Slow Mode"><Play className="w-5 h-5" /></button>}
-                        {!autoPreview && (
-                          <div className="w-full flex justify-center gap-4 mt-2 border-t border-white/10 pt-2">
-                              <button onClick={handleSnooze} className="text-slate-400 hover:text-indigo-300 text-xs flex items-center gap-1"><Moon className="w-3 h-3" /> Snooze 30d</button>
-                              <button onClick={handleDelete} className="text-slate-400 hover:text-red-400 text-xs flex items-center gap-1"><Trash2 className="w-3 h-3" /> Delete</button>
-                          </div>
-                        )}
                         </div>
                     </div>
                     </div>

@@ -136,7 +136,7 @@ const mergeData = (local: AppData, remote: AppData): AppData => {
   return merged;
 };
 
-// Pulls remote, merges with local, and updates remote. Used on App Start or Force Sync.
+// Pulls remote and prefers cloud data when present. Used on App Start or Force Sync.
 export const syncData = async (localData: AppData): Promise<{ success: boolean; data?: AppData; error?: string }> => {
   if (!supabase) return { success: false, error: "Not connected" };
 
@@ -156,7 +156,8 @@ export const syncData = async (localData: AppData): Promise<{ success: boolean; 
 
     if (remoteRows && remoteRows.content) {
       remoteData = remoteRows.content as AppData;
-      finalData = mergeData(localData, remoteData);
+      const remoteHasItems = getCardCount(remoteData) > 0;
+      finalData = remoteHasItems ? remoteData : localData;
     }
 
     const { error: upsertError } = await supabase
