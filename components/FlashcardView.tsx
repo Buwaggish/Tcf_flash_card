@@ -5,7 +5,7 @@ import { playAzureTTS, stopAzureTTS } from '../services/azureService';
 import { generateCardContext } from '../services/geminiService';
 import { calculateNextReview, getDueDateLabel, isCardDue, getCardStatusLabel, getCardPriority, INITIAL_SRS_DATA } from '../services/srsService';
 import { ConfirmModal } from './ConfirmModal';
-import { ArrowLeft, RefreshCw, Volume2, Play, Settings, CloudLightning, Brain, CheckCircle, List, Layers, Sparkles, Loader2, Save, Key, Clock, RotateCcw, Trash2, Moon } from 'lucide-react';
+import { ArrowLeft, RefreshCw, Volume2, Play, Pause, Settings, CloudLightning, Brain, CheckCircle, List, Layers, Sparkles, Loader2, Save, Key, Clock, RotateCcw, Trash2, Moon, Maximize2, Minimize2 } from 'lucide-react';
 
 interface FlashcardViewProps {
   cards: Flashcard[];
@@ -17,11 +17,15 @@ interface FlashcardViewProps {
   onStudyActivity?: () => void; 
   todayStudyTime?: number;
   onResetTimer?: () => void;
+  isTimerPaused?: boolean;
+  isTimerExpanded?: boolean;
+  onToggleTimerPause?: () => void;
+  onToggleTimerExpanded?: () => void;
   autoPreview?: boolean;
 }
 
 export const FlashcardView: React.FC<FlashcardViewProps> = ({ 
-  cards, title, onBack, unitId, onUpdateCard, onDeleteCard, onStudyActivity, todayStudyTime = 0, onResetTimer, autoPreview = false 
+  cards, title, onBack, unitId, onUpdateCard, onDeleteCard, onStudyActivity, todayStudyTime = 0, onResetTimer, isTimerPaused = false, isTimerExpanded = false, onToggleTimerPause, onToggleTimerExpanded, autoPreview = false 
 }) => {
   const [viewMode, setViewMode] = useState<'study' | 'gallery'>('study');
   const [studyQueue, setStudyQueue] = useState<Flashcard[]>([]);
@@ -302,9 +306,14 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
 
   const handleCancelConfirm = () => setPendingConfirm(null);
 
-  const formatTime = (seconds: number) => {
+  const formatTime = (seconds: number, showSeconds = false) => {
       const h = Math.floor(seconds / 3600);
       const m = Math.floor((seconds % 3600) / 60);
+      const s = seconds % 60;
+      if (showSeconds) {
+          if (h > 0) return `${h}h ${m}m ${s}s`;
+          return `${m}m ${s}s`;
+      }
       return h > 0 ? `${h}h ${m}m` : `${m}m`;
   };
 
@@ -458,9 +467,25 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
                 <ArrowLeft className="w-5 h-5" />
                 <span className="hidden sm:inline">Back</span>
             </button>
-            <div className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 rounded-lg border border-slate-700" title="Today's Study Time">
+            <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-800 rounded-lg border border-slate-700" title="Today's Study Time">
                 <Clock className="w-4 h-4 text-indigo-400" />
-                <span className="font-mono text-sm font-bold text-slate-300">{formatTime(todayStudyTime)}</span>
+                <span className={`font-mono text-sm font-bold ${isTimerPaused ? 'text-slate-500' : 'text-slate-300'}`}>
+                  {formatTime(todayStudyTime, isTimerExpanded)}
+                </span>
+                <button
+                  onClick={(e) => { e.stopPropagation(); onToggleTimerExpanded?.(); }}
+                  className="text-slate-500 hover:text-slate-200 transition"
+                  title={isTimerExpanded ? 'Hide seconds' : 'Show seconds'}
+                >
+                  {isTimerExpanded ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
+                </button>
+                <button
+                  onClick={(e) => { e.stopPropagation(); onToggleTimerPause?.(); }}
+                  className="text-slate-500 hover:text-slate-200 transition"
+                  title={isTimerPaused ? 'Resume timer' : 'Pause timer'}
+                >
+                  {isTimerPaused ? <Play className="w-3.5 h-3.5" /> : <Pause className="w-3.5 h-3.5" />}
+                </button>
                 {onResetTimer && (
                     <button onClick={handleResetTimerClick} className="ml-2 text-slate-600 hover:text-red-400 transition" title="Reset Timer">
                         <RotateCcw className="w-3 h-3" />

@@ -4,7 +4,7 @@ import { ImportModal } from './components/ImportModal';
 import { FlashcardView } from './components/FlashcardView';
 import { SyncModal } from './components/SyncModal';
 import { ConfirmModal } from './components/ConfirmModal';
-import { Plus, BookOpen, ChevronRight, Layers, Trash2, Cloud, Loader2, CheckCircle, CloudOff, Brain, Download, Bell, BellOff, Flame, Play, Clock } from 'lucide-react';
+import { Plus, BookOpen, ChevronRight, Layers, Trash2, Cloud, Loader2, CheckCircle, CloudOff, Brain, Download, Bell, BellOff, Flame, Play, Pause, Maximize2, Minimize2, Clock } from 'lucide-react';
 import { initSupabase, syncData, pullData, pushData, consolidateData, saveStudyLog, fetchTodayStudyLog } from './services/syncService';
 import { isCardDue } from './services/srsService';
 
@@ -32,6 +32,8 @@ export default function App() {
   // Streak & Timer
   const [streak, setStreak] = useState(0);
   const [todayStudyTime, setTodayStudyTime] = useState(0); // seconds
+  const [isTimerPaused, setIsTimerPaused] = useState(false);
+  const [isTimerExpanded, setIsTimerExpanded] = useState(false);
   type ConfirmState = 
     | { type: 'resetTimer' }
     | { type: 'deleteUnit'; catIdx: number; unitIdx: number; unitName: string }
@@ -51,9 +53,11 @@ export default function App() {
           localStorage.setItem('tcf-study-time', '0');
       }
       setTodayStudyTime(initialTime);
+  }, []);
 
+  useEffect(() => {
       const interval = setInterval(() => {
-          if (document.visibilityState === 'visible') {
+          if (document.visibilityState === 'visible' && !isTimerPaused) {
               setTodayStudyTime(prev => {
                   const newVal = prev + 1;
                   if (newVal % 10 === 0) { 
@@ -69,7 +73,7 @@ export default function App() {
       }, 1000);
 
       return () => clearInterval(interval);
-  }, []);
+  }, [isTimerPaused]);
 
   // Fetch Cloud Timer on Connect
   useEffect(() => {
@@ -98,12 +102,20 @@ export default function App() {
       setConfirmState({ type: 'resetTimer' });
   };
 
-  const formatTime = (seconds: number) => {
+  const formatTime = (seconds: number, showSeconds = false) => {
       const h = Math.floor(seconds / 3600);
       const m = Math.floor((seconds % 3600) / 60);
+      const s = seconds % 60;
+      if (showSeconds) {
+          if (h > 0) return `${h}h ${m}m ${s}s`;
+          return `${m}m ${s}s`;
+      }
       if (h > 0) return `${h}h ${m}m`;
       return `${m}m`;
   };
+
+  const toggleTimerPause = () => setIsTimerPaused(prev => !prev);
+  const toggleTimerExpanded = () => setIsTimerExpanded(prev => !prev);
 
   useEffect(() => {
     if ('Notification' in window && Notification.permission === 'granted') {
@@ -448,9 +460,25 @@ export default function App() {
             </div>
             
             <div className="flex gap-3">
-                 <div className="flex items-center gap-1.5 px-3 py-3 bg-slate-800 rounded-lg border border-slate-700" title="Study Time Today">
+                 <div className="flex items-center gap-2 px-3 py-3 bg-slate-800 rounded-lg border border-slate-700" title="Study Time Today">
                      <Clock className="w-5 h-5 text-indigo-400" />
-                     <span className="font-mono font-bold text-slate-300">{formatTime(todayStudyTime)}</span>
+                     <span className={`font-mono font-bold ${isTimerPaused ? 'text-slate-500' : 'text-slate-300'}`}>
+                       {formatTime(todayStudyTime, isTimerExpanded)}
+                     </span>
+                     <button
+                       onClick={toggleTimerExpanded}
+                       className="text-slate-500 hover:text-slate-200 transition"
+                       title={isTimerExpanded ? 'Hide seconds' : 'Show seconds'}
+                     >
+                       {isTimerExpanded ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+                     </button>
+                     <button
+                       onClick={toggleTimerPause}
+                       className="text-slate-500 hover:text-slate-200 transition"
+                       title={isTimerPaused ? 'Resume timer' : 'Pause timer'}
+                     >
+                       {isTimerPaused ? <Play className="w-4 h-4" /> : <Pause className="w-4 h-4" />}
+                     </button>
                  </div>
 
                  <div className="flex items-center gap-1.5 px-3 py-3 bg-slate-800 rounded-lg border border-slate-700" title="Study Streak">
@@ -698,6 +726,10 @@ export default function App() {
         onStudyActivity={viewState === ViewState.AUTO_PREVIEW ? undefined : handleStudyActivity}
         todayStudyTime={todayStudyTime}
         onResetTimer={handleResetTimer}
+        isTimerPaused={isTimerPaused}
+        isTimerExpanded={isTimerExpanded}
+        onToggleTimerPause={toggleTimerPause}
+        onToggleTimerExpanded={toggleTimerExpanded}
         autoPreview={viewState === ViewState.AUTO_PREVIEW}
       />
     );
