@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Flashcard } from '../types';
-import { getFrenchVoices, speak, cancelSpeech } from '../services/ttsService';
+import { getFrenchVoices, speak, cancelSpeech, speakViaLocalService } from '../services/ttsService';
 import { playAzureTTS, stopAzureTTS } from '../services/azureService';
 import { generateCardContext } from '../services/geminiService';
 import { calculateNextReview, getDueDateLabel, isCardDue, getCardStatusLabel, getCardPriority, INITIAL_SRS_DATA } from '../services/srsService';
 import { ConfirmModal } from './ConfirmModal';
-import { ArrowLeft, RefreshCw, Volume2, Play, Pause, Settings, CloudLightning, Brain, CheckCircle, List, Layers, Sparkles, Loader2, Save, Key, Clock, RotateCcw, Trash2, Moon, Maximize2, Minimize2 } from 'lucide-react';
+import { ArrowLeft, RefreshCw, Volume2, Play, Pause, Settings, CloudLightning, Brain, CheckCircle, List, Layers, Sparkles, Loader2, Save, Key, Clock, RotateCcw, Trash2, Moon, Maximize2, Minimize2, Mic } from 'lucide-react';
 
 interface FlashcardViewProps {
   cards: Flashcard[];
@@ -170,6 +170,22 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
           setIsPlaying(false);
       }
   }, [isPlaying, azureRegion, azureKey]);
+
+  const handleLocalProxyPlay = useCallback(async (text: string, e?: React.MouseEvent) => {
+      e?.stopPropagation();
+      if (isPlaying) return;
+      try {
+          setIsPlaying(true);
+          cancelSpeech();
+          stopAzureTTS({ silent: true });
+          await speakViaLocalService(text);
+      } catch (err) {
+          console.error("Local proxy playback error", err);
+          alert("Local TTS failed. Check the Siri proxy service.");
+      } finally {
+          setIsPlaying(false);
+      }
+  }, [isPlaying]);
 
   const handlePlaySequence = async (text: string, e?: React.MouseEvent) => {
     e?.stopPropagation();
@@ -647,6 +663,7 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
                                 <div className="mt-auto flex flex-wrap justify-center gap-3 pt-4 border-t border-white/10 w-full" onClick={(e) => e.stopPropagation()}>
                                 <button onClick={(e) => handlePlayAudio(currentCard.back, e)} disabled={isPlaying} title="Play Local (P)" className="p-3 bg-indigo-600 hover:bg-indigo-500 rounded-full text-white shadow-lg">{isPlaying && !isFrenchLong ? <RefreshCw className="w-5 h-5 animate-spin" /> : <Volume2 className="w-5 h-5" />}</button>
                                 <button onClick={(e) => handleCloudPlay(currentCard.back, e)} disabled={isPlaying || !azureKey} title="Play Cloud (O)" className={`p-3 rounded-full shadow-lg ${azureKey ? 'bg-cyan-600 hover:bg-cyan-500 text-white' : 'bg-slate-700 text-slate-400'}`}>{isPlaying ? <RefreshCw className="w-5 h-5 animate-spin" /> : <CloudLightning className="w-5 h-5" />}</button>
+                                <button onClick={(e) => handleLocalProxyPlay(currentCard.back, e)} disabled={isPlaying} title="Play Siri Proxy" className="p-3 rounded-full shadow-lg bg-emerald-600 hover:bg-emerald-500 text-white">{isPlaying ? <RefreshCw className="w-5 h-5 animate-spin" /> : <Mic className="w-5 h-5" />}</button>
                                 <button onClick={handleAiExplain} disabled={isGeneratingAi} className={`p-3 rounded-full shadow-lg transition ${isGeneratingAi ? 'bg-slate-600' : 'bg-violet-600 hover:bg-violet-500'} text-white`} title="Explain with AI">{isGeneratingAi ? <Loader2 className="w-5 h-5 animate-spin" /> : <Sparkles className="w-5 h-5" />}</button>
                                 {isFrenchLong && <button onClick={(e) => handlePlaySequence(currentCard.back, e)} disabled={isPlaying} className="p-3 bg-slate-700 hover:bg-slate-600 rounded-full text-white shadow-lg" title="Slow Mode"><Play className="w-5 h-5" /></button>}
                                 {!autoPreview && (

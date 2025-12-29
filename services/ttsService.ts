@@ -62,3 +62,21 @@ export const speak = (text: string, voice: SpeechSynthesisVoice | null, rate: nu
     window.speechSynthesis.speak(utterance);
   });
 };
+
+/**
+ * Speaks the text via a local HTTP TTS proxy (e.g. Siri on localhost).
+ */
+export const speakViaLocalService = async (text: string): Promise<void> => {
+  const response = await fetch('http://localhost:1000/speak', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ text })
+  });
+
+  if (!response.ok) {
+    const message = await response.text().catch(() => '');
+    throw new Error(message || `Local TTS failed with ${response.status}`);
+  }
+};
