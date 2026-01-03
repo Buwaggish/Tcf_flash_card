@@ -455,6 +455,9 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
       else if (e.key.toLowerCase() === 'o') {
           currentCard && handleCloudPlay(currentCard.back);
       }
+      else if (e.key.toLowerCase() === 'i') {
+          currentCard && handleLocalProxyPlay(currentCard.back);
+      }
       else if (isFlipped) {
           // SRS shortcuts: 1-4 OR q,w,e,r
           if (e.key === '1' || e.key.toLowerCase() === 'q') handleRate('again');
@@ -663,7 +666,7 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
                                 <div className="mt-auto flex flex-wrap justify-center gap-3 pt-4 border-t border-white/10 w-full" onClick={(e) => e.stopPropagation()}>
                                 <button onClick={(e) => handlePlayAudio(currentCard.back, e)} disabled={isPlaying} title="Play Local (P)" className="p-3 bg-indigo-600 hover:bg-indigo-500 rounded-full text-white shadow-lg">{isPlaying && !isFrenchLong ? <RefreshCw className="w-5 h-5 animate-spin" /> : <Volume2 className="w-5 h-5" />}</button>
                                 <button onClick={(e) => handleCloudPlay(currentCard.back, e)} disabled={isPlaying || !azureKey} title="Play Cloud (O)" className={`p-3 rounded-full shadow-lg ${azureKey ? 'bg-cyan-600 hover:bg-cyan-500 text-white' : 'bg-slate-700 text-slate-400'}`}>{isPlaying ? <RefreshCw className="w-5 h-5 animate-spin" /> : <CloudLightning className="w-5 h-5" />}</button>
-                                <button onClick={(e) => handleLocalProxyPlay(currentCard.back, e)} disabled={isPlaying} title="Play Siri Proxy" className="p-3 rounded-full shadow-lg bg-emerald-600 hover:bg-emerald-500 text-white">{isPlaying ? <RefreshCw className="w-5 h-5 animate-spin" /> : <Mic className="w-5 h-5" />}</button>
+                                <button onClick={(e) => handleLocalProxyPlay(currentCard.back, e)} disabled={isPlaying} title="Play Siri Proxy (I)" className="p-3 rounded-full shadow-lg bg-emerald-600 hover:bg-emerald-500 text-white">{isPlaying ? <RefreshCw className="w-5 h-5 animate-spin" /> : <Mic className="w-5 h-5" />}</button>
                                 <button onClick={handleAiExplain} disabled={isGeneratingAi} className={`p-3 rounded-full shadow-lg transition ${isGeneratingAi ? 'bg-slate-600' : 'bg-violet-600 hover:bg-violet-500'} text-white`} title="Explain with AI">{isGeneratingAi ? <Loader2 className="w-5 h-5 animate-spin" /> : <Sparkles className="w-5 h-5" />}</button>
                                 {isFrenchLong && <button onClick={(e) => handlePlaySequence(currentCard.back, e)} disabled={isPlaying} className="p-3 bg-slate-700 hover:bg-slate-600 rounded-full text-white shadow-lg" title="Slow Mode"><Play className="w-5 h-5" /></button>}
                                 {!autoPreview && (
