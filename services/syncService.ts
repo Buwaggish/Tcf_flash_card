@@ -4,9 +4,9 @@ import { AppData, Category, Unit, Flashcard } from '../types';
 let supabase: SupabaseClient | null = null;
 
 // Constants
-const LEGACY_TABLE_NAME = 'tcf_sync';
+// const LEGACY_TABLE_NAME = 'tcf_sync';
 const LOG_TABLE_NAME = 'study_logs';
-const ROW_ID = 1; // Single row for legacy sync
+// const ROW_ID = 1; // Single row for legacy sync
 
 const CATEGORY_TABLE = 'tcf_categories';
 const UNIT_TABLE = 'tcf_units';
@@ -57,21 +57,9 @@ const upsertBatches = async (table: string, rows: any[], batchSize: number) => {
     }
 };
 
-const fetchLegacyData = async (): Promise<AppData | null> => {
-    if (!supabase) return null;
-    try {
-        const { data, error } = await supabase
-            .from(LEGACY_TABLE_NAME)
-            .select('content')
-            .eq('id', ROW_ID)
-            .single();
-
-        if (error || !data?.content) return null;
-        return data.content as AppData;
-    } catch (e) {
-        return null;
-    }
-};
+// const fetchLegacyData = async (): Promise<AppData | null> => {
+//     return null;
+// };
 
 const getSnapshotFromMeta = async (): Promise<string | null> => {
     if (!supabase) return null;
@@ -89,10 +77,59 @@ const getSnapshotFromMeta = async (): Promise<string | null> => {
     }
 };
 
-const resolveSnapshotId = async (): Promise<string | null> => {
-    const metaSnapshot = await getSnapshotFromMeta();
-    if (metaSnapshot) return metaSnapshot;
+const getSnapshotCardCount = async (snapshotId: string): Promise<number | null> => {
     if (!supabase) return null;
+    try {
+        const { count, error } = await supabase
+            .from(CARD_TABLE)
+            .select('id', { count: 'exact', head: true })
+            .eq('snapshot_id', snapshotId);
+
+        if (error) return null;
+        return count ?? 0;
+    } catch (e) {
+        return null;
+    }
+};
+
+const getTotalCardCount = async (): Promise<number | null> => {
+    if (!supabase) return null;
+    try {
+        const { count, error } = await supabase
+            .from(CARD_TABLE)
+            .select('id', { count: 'exact', head: true });
+
+        if (error) return null;
+        return count ?? 0;
+    } catch (e) {
+        return null;
+    }
+};
+
+const resolveSnapshotId = async (): Promise<string | null> => {
+    if (!supabase) return null;
+
+    const metaSnapshot = await getSnapshotFromMeta();
+    if (metaSnapshot) {
+        const metaCount = await getSnapshotCardCount(metaSnapshot);
+        if ((metaCount ?? 0) > 0) return metaSnapshot;
+
+        const totalCount = await getTotalCardCount();
+        if ((totalCount ?? 0) === 0) return metaSnapshot;
+    }
+
+    try {
+        const { data: cardRow } = await supabase
+            .from(CARD_TABLE)
+            .select('snapshot_id, updated_at')
+            .order('updated_at', { ascending: false })
+            .limit(1)
+            .single();
+
+        if (cardRow?.snapshot_id) return cardRow.snapshot_id as string;
+    } catch (e) {
+        // ignore and fall back
+    }
 
     try {
         const { data: catRow } = await supabase
@@ -116,19 +153,6 @@ const resolveSnapshotId = async (): Promise<string | null> => {
             .single();
 
         if (unitRow?.snapshot_id) return unitRow.snapshot_id as string;
-    } catch (e) {
-        // ignore and fall back
-    }
-
-    try {
-        const { data: cardRow } = await supabase
-            .from(CARD_TABLE)
-            .select('snapshot_id, updated_at')
-            .order('updated_at', { ascending: false })
-            .limit(1)
-            .single();
-
-        if (cardRow?.snapshot_id) return cardRow.snapshot_id as string;
     } catch (e) {
         // ignore and fall back
     }
@@ -269,6 +293,17 @@ const writeSnapshotData = async (data: AppData): Promise<void> => {
         await upsertBatches(CARD_TABLE, cards, 500);
     }
 
+    if (cards.length > 0) {
+        const { count, error } = await supabase
+            .from(CARD_TABLE)
+            .select('id', { count: 'exact', head: true })
+            .eq('snapshot_id', snapshotId);
+        if (error) throw error;
+        if ((count ?? 0) < cards.length) {
+            throw new Error(`Snapshot write incomplete: ${count ?? 0}/${cards.length}`);
+        }
+    }
+
     const { error: metaError } = await supabase
         .from(META_TABLE)
         .upsert({ key: META_KEY, value: snapshotId, updated_at: updatedAt });
@@ -280,35 +315,9 @@ const writeSnapshotData = async (data: AppData): Promise<void> => {
     await supabase.from(CARD_TABLE).delete().neq('snapshot_id', snapshotId);
 };
 
-const migrateLegacyIfNeeded = async (): Promise<AppData | null> => {
-    if (!supabase) return null;
-
-    const snapshotId = await resolveSnapshotId();
-    if (snapshotId) return null;
-
-    try {
-        const { count: cardCount } = await supabase
-            .from(CARD_TABLE)
-            .select('id', { count: 'exact', head: true });
-
-        if ((cardCount || 0) > 0) return null;
-
-        const { count: categoryCount } = await supabase
-            .from(CATEGORY_TABLE)
-            .select('id', { count: 'exact', head: true });
-
-        if ((categoryCount || 0) > 0) return null;
-    } catch (e) {
-        // If table missing or count fails, don't attempt migration.
-        return null;
-    }
-
-    const legacy = await fetchLegacyData();
-    if (!legacy || !hasCards(legacy)) return null;
-
-    await writeSnapshotData(legacy);
-    return legacy;
-};
+// const migrateLegacyIfNeeded = async (): Promise<AppData | null> => {
+//     return null;
+// };
 
 /**
  * Peek at the cloud data to get its card count without full sync implications
@@ -316,12 +325,8 @@ const migrateLegacyIfNeeded = async (): Promise<AppData | null> => {
 export const fetchCloudCount = async (): Promise<number | null> => {
     if (!supabase) return null;
     try {
-        await migrateLegacyIfNeeded();
         const snapshotId = await resolveSnapshotId();
-        if (!snapshotId) {
-            const legacy = await fetchLegacyData();
-            return legacy ? getCardCount(legacy) : null;
-        }
+        if (!snapshotId) return null;
 
         const { count, error } = await supabase
             .from(CARD_TABLE)
@@ -329,10 +334,7 @@ export const fetchCloudCount = async (): Promise<number | null> => {
             .eq('snapshot_id', snapshotId);
 
         if (error) return null;
-        if ((count ?? 0) > 0) return count ?? 0;
-
-        const legacy = await fetchLegacyData();
-        return legacy ? getCardCount(legacy) : count ?? 0;
+        return count ?? 0;
     } catch (e) {
         return null;
     }
@@ -428,27 +430,12 @@ export const syncData = async (localData: AppData): Promise<{ success: boolean; 
   if (!supabase) return { success: false, error: "Not connected" };
 
   try {
-    const migrated = await migrateLegacyIfNeeded();
-    if (migrated) {
-        return { success: true, data: migrated };
-    }
-
     let finalData = localData;
     const snapshotId = await resolveSnapshotId();
 
     if (snapshotId) {
         const remoteData = await fetchSnapshotData(snapshotId);
-        if (hasCards(remoteData)) {
-            finalData = remoteData;
-        } else {
-            const legacy = await fetchLegacyData();
-            if (legacy && hasCards(legacy)) {
-                await writeSnapshotData(legacy);
-                finalData = legacy;
-            } else {
-                finalData = localData;
-            }
-        }
+        if (hasCards(remoteData)) finalData = remoteData;
     }
 
     await writeSnapshotData(finalData);
@@ -465,18 +452,8 @@ export const pullData = async (localData: AppData): Promise<{ success: boolean; 
   if (!supabase) return { success: false, error: "Not connected" };
 
   try {
-    const migrated = await migrateLegacyIfNeeded();
-    if (migrated) {
-        return { success: true, data: migrated };
-    }
-
     const snapshotId = await resolveSnapshotId();
     if (!snapshotId) {
-        const legacy = await fetchLegacyData();
-        if (legacy && hasCards(legacy)) {
-            await writeSnapshotData(legacy);
-            return { success: true, data: legacy };
-        }
         return { success: true, data: localData };
     }
 
@@ -484,12 +461,6 @@ export const pullData = async (localData: AppData): Promise<{ success: boolean; 
     let finalData = localData;
     if (hasCards(remoteData)) {
         finalData = remoteData;
-    } else {
-        const legacy = await fetchLegacyData();
-        if (legacy && hasCards(legacy)) {
-            await writeSnapshotData(legacy);
-            finalData = legacy;
-        }
     }
     return { success: true, data: finalData };
   } catch (err: any) {
