@@ -89,10 +89,14 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
   const [showGoogleSettings, setShowGoogleSettings] = useState(false);
   const [aiExplanation, setAiExplanation] = useState<string | null>(null);
   const [isGeneratingAi, setIsGeneratingAi] = useState(false);
+  const [isClozeMode, setIsClozeMode] = useState(false);
+  const [clozeInput, setClozeInput] = useState('');
+  const clozeIndexMapRef = useRef<Map<string, number>>(new Map());
 
   useEffect(() => {
       setAiExplanation(null);
       setIsGeneratingAi(false);
+      setClozeInput('');
   }, [currentCard]);
 
   useEffect(() => {
@@ -477,6 +481,17 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
   const nextGood = currentCard ? calculateNextReview(currentCard.srs, 'good') : null;
   const nextEasy = currentCard ? calculateNextReview(currentCard.srs, 'easy') : null;
 
+  const normalizeClozeWord = (value: string) =>
+    value.toLowerCase().replace(/[.,!?;:()"']/g, '').trim();
+
+  const getClozeIndex = (cardId: string, words: string[]) => {
+    const existing = clozeIndexMapRef.current.get(cardId);
+    if (existing !== undefined && existing < words.length) return existing;
+    const nextIndex = words.length > 0 ? Math.floor(Math.random() * words.length) : 0;
+    clozeIndexMapRef.current.set(cardId, nextIndex);
+    return nextIndex;
+  };
+
   return (
     <>
     <div className="flex flex-col h-full max-w-4xl mx-auto w-full p-4 relative">
@@ -534,6 +549,13 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
              <Brain className={`w-4 h-4 ${isDue ? 'text-orange-400' : 'text-green-400'}`} />
              <span className="text-slate-300 text-xs font-mono">{studyQueue.length} Queue</span>
           </div>
+          <button
+            onClick={() => setIsClozeMode(prev => !prev)}
+            className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-widest border transition ${isClozeMode ? 'bg-amber-500/20 text-amber-300 border-amber-500/40' : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-white'}`}
+            title="Cloze mode (fill the missing word)"
+          >
+            Cloze
+          </button>
           <div className="relative">
             <button onClick={() => setShowVoiceSettings(!showVoiceSettings)} className={`p-2 rounded-lg transition ${showVoiceSettings ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}><Settings className="w-5 h-5" /></button>
             {showVoiceSettings && (
@@ -661,7 +683,32 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
                             )}
                             <div className={`flex-1 w-full flex flex-col items-center ${aiExplanation ? 'mt-4' : ''}`}>
                                 <span className="text-xs font-bold text-indigo-400 uppercase tracking-widest mb-4">Réponse</span>
-                                <p className="text-2xl md:text-3xl text-center font-medium text-white leading-relaxed overflow-y-auto max-h-[55%] mb-4">{currentCard.back}</p>
+                                {isClozeMode ? (() => {
+                                  const words = currentCard.back.split(' ').filter(Boolean);
+                                  const clozeIndex = getClozeIndex(currentCard.id, words);
+                                  const clozeWord = words[clozeIndex] || '';
+                                  const display = words.map((word, idx) => (idx === clozeIndex ? '____' : word)).join(' ');
+                                  const isCorrect = normalizeClozeWord(clozeInput) === normalizeClozeWord(clozeWord);
+                                  return (
+                                    <div className="w-full flex flex-col items-center gap-3 mb-4">
+                                      <p className="text-2xl md:text-3xl text-center font-medium text-white leading-relaxed overflow-y-auto max-h-[45%]">{display}</p>
+                                      <input
+                                        value={clozeInput}
+                                        onChange={(e) => setClozeInput(e.target.value)}
+                                        className={`w-full max-w-xs bg-slate-900 border rounded-lg px-3 py-2 text-center text-white focus:outline-none ${isCorrect ? 'border-emerald-500/60' : 'border-slate-700'}`}
+                                        placeholder="Type the missing word"
+                                        onClick={(e) => e.stopPropagation()}
+                                      />
+                                      {clozeInput && (
+                                        <div className={`text-xs font-bold uppercase tracking-widest ${isCorrect ? 'text-emerald-300' : 'text-slate-400'}`}>
+                                          {isCorrect ? 'Correct' : 'Keep trying'}
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })() : (
+                                  <p className="text-2xl md:text-3xl text-center font-medium text-white leading-relaxed overflow-y-auto max-h-[55%] mb-4">{currentCard.back}</p>
+                                )}
                                 
                                 <div className="mt-auto flex flex-wrap justify-center gap-3 pt-4 border-t border-white/10 w-full" onClick={(e) => e.stopPropagation()}>
                                 <button onClick={(e) => handlePlayAudio(currentCard.back, e)} disabled={isPlaying} title="Play Local (P)" className="p-3 bg-indigo-600 hover:bg-indigo-500 rounded-full text-white shadow-lg">{isPlaying && !isFrenchLong ? <RefreshCw className="w-5 h-5 animate-spin" /> : <Volume2 className="w-5 h-5" />}</button>
