@@ -150,8 +150,10 @@ export const SyncModal: React.FC<SyncModalProps> = ({
               <p className="font-bold mb-1">Setup Supabase (Free):</p>
               <ol className="list-decimal list-inside space-y-1 opacity-90">
                   <li>Create project at <b>supabase.com</b></li>
-                  <li>Run SQL: <code>create table tcf_sync (id int8 primary key, content jsonb, updated_at timestamptz);</code></li>
-                  <li>Run SQL: <code>insert into tcf_sync (id, content) values (1, '[]');</code></li>
+                  <li>Run SQL: <code>create table tcf_categories (id text primary key, name text, snapshot_id text, updated_at timestamptz);</code></li>
+                  <li>Run SQL: <code>create table tcf_units (id text primary key, category_id text, name text, snapshot_id text, updated_at timestamptz);</code></li>
+                  <li>Run SQL: <code>create table tcf_cards (id text primary key, unit_id text, front text, back text, mastered boolean, srs jsonb, snapshot_id text, updated_at timestamptz);</code></li>
+                  <li>Run SQL: <code>create table tcf_sync_meta (key text primary key, value text, updated_at timestamptz);</code></li>
                   <li className="text-orange-300 mt-1">Run SQL: <code>create table study_logs (date_id text primary key, duration int, updated_at timestamptz);</code></li>
               </ol>
             </div>

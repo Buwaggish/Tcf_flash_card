@@ -581,8 +581,9 @@ export default function App() {
                     </div>
                   ) : (
                     <div className="space-y-1">
-                      {cat.units.map((unit, unitIdx) => {
+                      {[...cat.units].sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })).map((unit) => {
                         const dueCount = countDueCards(unit.cards);
+                        const unitIdx = cat.units.findIndex(u => u.id === unit.id);
                         return (
                           <div 
                             key={unit.id}

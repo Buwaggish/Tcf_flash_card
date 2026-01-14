@@ -22,11 +22,20 @@ export const INITIAL_SRS_DATA: SRSData = {
  * Good  -> 1 day
  * Easy  -> 7 days
  */
+const normalizeSrs = (srs: SRSData | null | undefined): SRSData | undefined => {
+  if (!srs) return undefined;
+  if (typeof srs.dueDate !== 'number' || Number.isNaN(srs.dueDate)) return undefined;
+  if (typeof srs.interval !== 'number' || Number.isNaN(srs.interval)) return undefined;
+  if (typeof srs.repetition !== 'number' || Number.isNaN(srs.repetition)) return undefined;
+  if (typeof srs.easeFactor !== 'number' || Number.isNaN(srs.easeFactor)) return undefined;
+  return srs;
+};
+
 export const calculateNextReview = (
-  currentSRS: SRSData | undefined, 
+  currentSRS: SRSData | null | undefined, 
   grade: 'again' | 'hard' | 'good' | 'easy'
 ): SRSData => {
-  const srs = currentSRS || { ...INITIAL_SRS_DATA };
+  const srs = normalizeSrs(currentSRS) || { ...INITIAL_SRS_DATA };
   
   let { interval, repetition, easeFactor } = srs;
   
@@ -102,8 +111,9 @@ export const getDueDateLabel = (timestamp: number): string => {
 
 // Broad check for UI "Due" badge (includes New cards)
 export const isCardDue = (card: Flashcard): boolean => {
-  if (!card.srs) return true; // New card is treated as due
-  return card.srs.dueDate <= Date.now();
+  const srs = normalizeSrs(card.srs ?? undefined);
+  if (!srs) return true; // New or invalid SRS treated as due
+  return srs.dueDate <= Date.now();
 };
 
 // Strict priority helper for Sorting
@@ -111,14 +121,16 @@ export const isCardDue = (card: Flashcard): boolean => {
 // 1: New (No SRS) - Priority Medium
 // 2: Future (Has SRS, Time future) - Priority Low
 export const getCardPriority = (card: Flashcard): number => {
-    if (!card.srs) return 1; // New
-    if (card.srs.dueDate <= Date.now()) return 0; // Active Due
+    const srs = normalizeSrs(card.srs ?? undefined);
+    if (!srs) return 1; // New
+    if (srs.dueDate <= Date.now()) return 0; // Active Due
     return 2; // Future
 };
 
 export const getCardStatusLabel = (card: Flashcard): { label: string, type: 'new' | 'due' | 'ok' } => {
-  if (!card.srs) return { label: 'New', type: 'new' };
-  if (card.srs.dueDate <= Date.now()) return { label: 'Due', type: 'due' };
+  const srs = normalizeSrs(card.srs ?? undefined);
+  if (!srs) return { label: 'New', type: 'new' };
+  if (srs.dueDate <= Date.now()) return { label: 'Due', type: 'due' };
   
-  return { label: getDueDateLabel(card.srs.dueDate), type: 'ok' };
+  return { label: getDueDateLabel(srs.dueDate), type: 'ok' };
 };

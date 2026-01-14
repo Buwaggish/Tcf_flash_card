@@ -4,9 +4,15 @@ import { AppData, Category, Unit, Flashcard } from '../types';
 let supabase: SupabaseClient | null = null;
 
 // Constants
-const TABLE_NAME = 'tcf_sync';
+const LEGACY_TABLE_NAME = 'tcf_sync';
 const LOG_TABLE_NAME = 'study_logs';
-const ROW_ID = 1; // Single row for simple personal sync
+const ROW_ID = 1; // Single row for legacy sync
+
+const CATEGORY_TABLE = 'tcf_categories';
+const UNIT_TABLE = 'tcf_units';
+const CARD_TABLE = 'tcf_cards';
+const META_TABLE = 'tcf_sync_meta';
+const META_KEY = 'current_snapshot';
 
 export interface SyncConfig {
   url: string;
@@ -32,20 +38,301 @@ export const getCardCount = (data: AppData): number => {
   return data.reduce((acc, cat) => acc + cat.units.reduce((uAcc, unit) => uAcc + unit.cards.length, 0), 0);
 };
 
+const hasCards = (data: AppData): boolean => getCardCount(data) > 0;
+
+const chunkArray = <T,>(items: T[], size: number): T[][] => {
+    const chunks: T[][] = [];
+    for (let i = 0; i < items.length; i += size) {
+        chunks.push(items.slice(i, i + size));
+    }
+    return chunks;
+};
+
+const upsertBatches = async (table: string, rows: any[], batchSize: number) => {
+    if (!supabase) throw new Error("Not connected");
+    const batches = chunkArray(rows, batchSize);
+    for (const batch of batches) {
+        const { error } = await supabase.from(table).upsert(batch);
+        if (error) throw error;
+    }
+};
+
+const fetchLegacyData = async (): Promise<AppData | null> => {
+    if (!supabase) return null;
+    try {
+        const { data, error } = await supabase
+            .from(LEGACY_TABLE_NAME)
+            .select('content')
+            .eq('id', ROW_ID)
+            .single();
+
+        if (error || !data?.content) return null;
+        return data.content as AppData;
+    } catch (e) {
+        return null;
+    }
+};
+
+const getSnapshotFromMeta = async (): Promise<string | null> => {
+    if (!supabase) return null;
+    try {
+        const { data, error } = await supabase
+            .from(META_TABLE)
+            .select('value')
+            .eq('key', META_KEY)
+            .single();
+
+        if (error || !data?.value) return null;
+        return data.value as string;
+    } catch (e) {
+        return null;
+    }
+};
+
+const resolveSnapshotId = async (): Promise<string | null> => {
+    const metaSnapshot = await getSnapshotFromMeta();
+    if (metaSnapshot) return metaSnapshot;
+    if (!supabase) return null;
+
+    try {
+        const { data: catRow } = await supabase
+            .from(CATEGORY_TABLE)
+            .select('snapshot_id, updated_at')
+            .order('updated_at', { ascending: false })
+            .limit(1)
+            .single();
+
+        if (catRow?.snapshot_id) return catRow.snapshot_id as string;
+    } catch (e) {
+        // ignore and fall back
+    }
+
+    try {
+        const { data: unitRow } = await supabase
+            .from(UNIT_TABLE)
+            .select('snapshot_id, updated_at')
+            .order('updated_at', { ascending: false })
+            .limit(1)
+            .single();
+
+        if (unitRow?.snapshot_id) return unitRow.snapshot_id as string;
+    } catch (e) {
+        // ignore and fall back
+    }
+
+    try {
+        const { data: cardRow } = await supabase
+            .from(CARD_TABLE)
+            .select('snapshot_id, updated_at')
+            .order('updated_at', { ascending: false })
+            .limit(1)
+            .single();
+
+        if (cardRow?.snapshot_id) return cardRow.snapshot_id as string;
+    } catch (e) {
+        // ignore and fall back
+    }
+
+    return null;
+};
+
+const fetchAllRows = async (
+    table: string,
+    select: string,
+    snapshotId: string,
+    batchSize: number = 1000
+): Promise<any[]> => {
+    if (!supabase) return [];
+    const rows: any[] = [];
+    let from = 0;
+    while (true) {
+        const { data, error } = await supabase
+            .from(table)
+            .select(select)
+            .eq('snapshot_id', snapshotId)
+            .order('id', { ascending: true })
+            .range(from, from + batchSize - 1);
+
+        if (error) throw error;
+        const batch = data || [];
+        rows.push(...batch);
+        if (batch.length < batchSize) break;
+        from += batchSize;
+    }
+    return rows;
+};
+
+const fetchSnapshotData = async (snapshotId: string): Promise<AppData> => {
+    if (!supabase) return [];
+
+    const categories = await fetchAllRows(
+        CATEGORY_TABLE,
+        'id, name, snapshot_id',
+        snapshotId,
+        500
+    );
+
+    if (!categories || categories.length === 0) return [];
+
+    const units = await fetchAllRows(
+        UNIT_TABLE,
+        'id, name, category_id, snapshot_id',
+        snapshotId,
+        1000
+    );
+
+    const cards = await fetchAllRows(
+        CARD_TABLE,
+        'id, unit_id, front, back, mastered, srs, snapshot_id',
+        snapshotId,
+        1000
+    );
+
+    const cardsByUnit = new Map<string, Flashcard[]>();
+    (cards || []).forEach(card => {
+        const list = cardsByUnit.get(card.unit_id as string) || [];
+        list.push({
+            id: card.id as string,
+            front: card.front as string,
+            back: card.back as string,
+            mastered: Boolean(card.mastered),
+            srs: (card.srs as Flashcard['srs']) || undefined
+        });
+        cardsByUnit.set(card.unit_id as string, list);
+    });
+
+    const unitsByCategory = new Map<string, Unit[]>();
+    (units || []).forEach(unit => {
+        const list = unitsByCategory.get(unit.category_id as string) || [];
+        list.push({
+            id: unit.id as string,
+            name: unit.name as string,
+            cards: cardsByUnit.get(unit.id as string) || []
+        });
+        unitsByCategory.set(unit.category_id as string, list);
+    });
+
+    return (categories || []).map(cat => ({
+        id: cat.id as string,
+        name: cat.name as string,
+        units: unitsByCategory.get(cat.id as string) || []
+    }));
+};
+
+const writeSnapshotData = async (data: AppData): Promise<void> => {
+    if (!supabase) throw new Error("Not connected");
+
+    const snapshotId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const updatedAt = new Date();
+
+    const categories = data.map(cat => ({
+        id: cat.id,
+        name: cat.name,
+        snapshot_id: snapshotId,
+        updated_at: updatedAt
+    }));
+
+    const units = data.flatMap(cat =>
+        cat.units.map(unit => ({
+            id: unit.id,
+            category_id: cat.id,
+            name: unit.name,
+            snapshot_id: snapshotId,
+            updated_at: updatedAt
+        }))
+    );
+
+    const cards = data.flatMap(cat =>
+        cat.units.flatMap(unit =>
+            unit.cards.map(card => ({
+                id: card.id,
+                unit_id: unit.id,
+                front: card.front,
+                back: card.back,
+                mastered: card.mastered,
+                srs: card.srs ?? null,
+                snapshot_id: snapshotId,
+                updated_at: updatedAt
+            }))
+        )
+    );
+
+    if (categories.length > 0) {
+        await upsertBatches(CATEGORY_TABLE, categories, 500);
+    }
+
+    if (units.length > 0) {
+        await upsertBatches(UNIT_TABLE, units, 500);
+    }
+
+    if (cards.length > 0) {
+        await upsertBatches(CARD_TABLE, cards, 500);
+    }
+
+    const { error: metaError } = await supabase
+        .from(META_TABLE)
+        .upsert({ key: META_KEY, value: snapshotId, updated_at: updatedAt });
+    if (metaError) throw metaError;
+
+    // Best-effort cleanup of older snapshots to avoid bloat.
+    await supabase.from(CATEGORY_TABLE).delete().neq('snapshot_id', snapshotId);
+    await supabase.from(UNIT_TABLE).delete().neq('snapshot_id', snapshotId);
+    await supabase.from(CARD_TABLE).delete().neq('snapshot_id', snapshotId);
+};
+
+const migrateLegacyIfNeeded = async (): Promise<AppData | null> => {
+    if (!supabase) return null;
+
+    const snapshotId = await resolveSnapshotId();
+    if (snapshotId) return null;
+
+    try {
+        const { count: cardCount } = await supabase
+            .from(CARD_TABLE)
+            .select('id', { count: 'exact', head: true });
+
+        if ((cardCount || 0) > 0) return null;
+
+        const { count: categoryCount } = await supabase
+            .from(CATEGORY_TABLE)
+            .select('id', { count: 'exact', head: true });
+
+        if ((categoryCount || 0) > 0) return null;
+    } catch (e) {
+        // If table missing or count fails, don't attempt migration.
+        return null;
+    }
+
+    const legacy = await fetchLegacyData();
+    if (!legacy || !hasCards(legacy)) return null;
+
+    await writeSnapshotData(legacy);
+    return legacy;
+};
+
 /**
  * Peek at the cloud data to get its card count without full sync implications
  */
 export const fetchCloudCount = async (): Promise<number | null> => {
     if (!supabase) return null;
     try {
-        const { data, error } = await supabase
-            .from(TABLE_NAME)
-            .select('content')
-            .eq('id', ROW_ID)
-            .single();
-        
-        if (error || !data) return null;
-        return getCardCount(data.content as AppData);
+        await migrateLegacyIfNeeded();
+        const snapshotId = await resolveSnapshotId();
+        if (!snapshotId) {
+            const legacy = await fetchLegacyData();
+            return legacy ? getCardCount(legacy) : null;
+        }
+
+        const { count, error } = await supabase
+            .from(CARD_TABLE)
+            .select('id', { count: 'exact', head: true })
+            .eq('snapshot_id', snapshotId);
+
+        if (error) return null;
+        if ((count ?? 0) > 0) return count ?? 0;
+
+        const legacy = await fetchLegacyData();
+        return legacy ? getCardCount(legacy) : count ?? 0;
     } catch (e) {
         return null;
     }
@@ -141,31 +428,30 @@ export const syncData = async (localData: AppData): Promise<{ success: boolean; 
   if (!supabase) return { success: false, error: "Not connected" };
 
   try {
-    const { data: remoteRows, error: fetchError } = await supabase
-      .from(TABLE_NAME)
-      .select('content')
-      .eq('id', ROW_ID)
-      .single();
-
-    if (fetchError && fetchError.code !== 'PGRST116') {
-      throw fetchError;
+    const migrated = await migrateLegacyIfNeeded();
+    if (migrated) {
+        return { success: true, data: migrated };
     }
 
     let finalData = localData;
-    let remoteData: AppData = [];
+    const snapshotId = await resolveSnapshotId();
 
-    if (remoteRows && remoteRows.content) {
-      remoteData = remoteRows.content as AppData;
-      const remoteHasItems = getCardCount(remoteData) > 0;
-      finalData = remoteHasItems ? remoteData : localData;
+    if (snapshotId) {
+        const remoteData = await fetchSnapshotData(snapshotId);
+        if (hasCards(remoteData)) {
+            finalData = remoteData;
+        } else {
+            const legacy = await fetchLegacyData();
+            if (legacy && hasCards(legacy)) {
+                await writeSnapshotData(legacy);
+                finalData = legacy;
+            } else {
+                finalData = localData;
+            }
+        }
     }
 
-    const { error: upsertError } = await supabase
-      .from(TABLE_NAME)
-      .upsert({ id: ROW_ID, content: finalData, updated_at: new Date() });
-
-    if (upsertError) throw upsertError;
-
+    await writeSnapshotData(finalData);
     return { success: true, data: finalData };
 
   } catch (err: any) {
@@ -179,25 +465,32 @@ export const pullData = async (localData: AppData): Promise<{ success: boolean; 
   if (!supabase) return { success: false, error: "Not connected" };
 
   try {
-    const { data: remoteRows, error: fetchError } = await supabase
-      .from(TABLE_NAME)
-      .select('content')
-      .eq('id', ROW_ID)
-      .single();
-
-    if (fetchError && fetchError.code !== 'PGRST116') {
-      throw fetchError;
+    const migrated = await migrateLegacyIfNeeded();
+    if (migrated) {
+        return { success: true, data: migrated };
     }
 
+    const snapshotId = await resolveSnapshotId();
+    if (!snapshotId) {
+        const legacy = await fetchLegacyData();
+        if (legacy && hasCards(legacy)) {
+            await writeSnapshotData(legacy);
+            return { success: true, data: legacy };
+        }
+        return { success: true, data: localData };
+    }
+
+    const remoteData = await fetchSnapshotData(snapshotId);
     let finalData = localData;
-    let remoteData: AppData = [];
-
-    if (remoteRows && remoteRows.content) {
-      remoteData = remoteRows.content as AppData;
-      const remoteHasItems = getCardCount(remoteData) > 0;
-      finalData = remoteHasItems ? remoteData : localData;
+    if (hasCards(remoteData)) {
+        finalData = remoteData;
+    } else {
+        const legacy = await fetchLegacyData();
+        if (legacy && hasCards(legacy)) {
+            await writeSnapshotData(legacy);
+            finalData = legacy;
+        }
     }
-
     return { success: true, data: finalData };
   } catch (err: any) {
     console.error("Pull Error:", err);
@@ -208,10 +501,7 @@ export const pullData = async (localData: AppData): Promise<{ success: boolean; 
 export const pushData = async (data: AppData): Promise<{ success: boolean; error?: string }> => {
   if (!supabase) return { success: false, error: "Not connected" };
   try {
-    const { error } = await supabase
-      .from(TABLE_NAME)
-      .upsert({ id: ROW_ID, content: data, updated_at: new Date() });
-    if (error) throw error;
+    await writeSnapshotData(data);
     return { success: true };
   } catch (err: any) {
     console.error("Push Error:", err);
