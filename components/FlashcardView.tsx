@@ -5,7 +5,7 @@ import { playAzureTTS, stopAzureTTS } from '../services/azureService';
 import { generateCardContext } from '../services/geminiService';
 import { calculateNextReview, getDueDateLabel, isCardDue, getCardStatusLabel, getCardPriority, INITIAL_SRS_DATA } from '../services/srsService';
 import { ConfirmModal } from './ConfirmModal';
-import { ArrowLeft, RefreshCw, Volume2, Play, Pause, Settings, CloudLightning, Brain, CheckCircle, List, Layers, Sparkles, Loader2, Save, Key, Clock, RotateCcw, Trash2, Moon, Maximize2, Minimize2, Mic } from 'lucide-react';
+import { ArrowLeft, RefreshCw, Volume2, Play, Pause, Settings, CloudLightning, Brain, CheckCircle, List, Layers, Sparkles, Loader2, Save, Key, Clock, RotateCcw, Trash2, Moon, Maximize2, Minimize2, Mic, Edit2, X } from 'lucide-react';
 
 interface FlashcardViewProps {
   cards: Flashcard[];
@@ -27,6 +27,7 @@ interface FlashcardViewProps {
 export const FlashcardView: React.FC<FlashcardViewProps> = ({ 
   cards, title, onBack, unitId, onUpdateCard, onDeleteCard, onStudyActivity, todayStudyTime = 0, onResetTimer, isTimerPaused = false, isTimerExpanded = false, onToggleTimerPause, onToggleTimerExpanded, autoPreview = false 
 }) => {
+  const containerRef = useRef<HTMLDivElement | null>(null);
   const [viewMode, setViewMode] = useState<'study' | 'gallery'>('study');
   const [studyQueue, setStudyQueue] = useState<Flashcard[]>([]);
   const [sessionComplete, setSessionComplete] = useState(false);
@@ -92,6 +93,9 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
   const [isClozeMode, setIsClozeMode] = useState(false);
   const [clozeInput, setClozeInput] = useState('');
   const clozeIndexMapRef = useRef<Map<string, number>>(new Map());
+  const [editingCard, setEditingCard] = useState<Flashcard | null>(null);
+  const [editFront, setEditFront] = useState('');
+  const [editBack, setEditBack] = useState('');
 
   useEffect(() => {
       setAiExplanation(null);
@@ -326,6 +330,26 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
 
   const handleCancelConfirm = () => setPendingConfirm(null);
 
+  const handleEditOpen = (card: Flashcard, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    setEditingCard(card);
+    setEditFront(card.front);
+    setEditBack(card.back);
+  };
+
+  const handleEditSave = () => {
+    if (!editingCard) return;
+    onUpdateCard(editingCard.id, { front: editFront.trim(), back: editBack.trim() });
+    setEditingCard(null);
+  };
+
+  const handleClozeInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    (e.target as HTMLInputElement).blur();
+    containerRef.current?.focus();
+  };
+
   const formatTime = (seconds: number, showSeconds = false) => {
       const h = Math.floor(seconds / 3600);
       const m = Math.floor((seconds % 3600) / 60);
@@ -494,7 +518,7 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
 
   return (
     <>
-    <div className="flex flex-col h-full max-w-4xl mx-auto w-full p-4 relative">
+    <div ref={containerRef} tabIndex={-1} className="flex flex-col h-full max-w-4xl mx-auto w-full p-4 relative focus:outline-none">
       <div className="flex items-center justify-between mb-6 shrink-0">
         <div className="flex items-center gap-3">
             <button onClick={() => { cancelSpeech(); onBack(); }} className="flex items-center gap-2 text-slate-400 hover:text-white transition">
@@ -637,6 +661,7 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
                                      <td className="p-4 align-top text-white">{card.back}</td>
                                      <td className="p-4 align-top text-right">
                                          <div className="flex justify-end gap-2">
+                                            <button onClick={(e) => handleEditOpen(card, e)} className="p-2 text-slate-500 hover:text-indigo-300 hover:bg-slate-700 rounded-full transition" title="Edit"><Edit2 className="w-4 h-4" /></button>
                                             <button onClick={(e) => {e.stopPropagation(); onDeleteCard && onDeleteCard(card.id)}} className="p-2 text-slate-500 hover:text-red-400 hover:bg-slate-700 rounded-full transition" title="Delete"><Trash2 className="w-4 h-4" /></button>
                                             <button onClick={(e) => handlePlayAudio(card.back, e)} className="p-2 text-slate-500 hover:text-indigo-400 hover:bg-slate-700 rounded-full transition"><Volume2 className="w-4 h-4" /></button>
                                          </div>
@@ -665,18 +690,18 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
             ) : (
                 <>
                 <div className="flex-1 flex items-center justify-center min-h-[40vh] perspective-1000 mb-4">
-                    <div className={`relative w-full max-w-lg transition-all duration-500 transform-style-3d cursor-pointer group min-h-[50vh] md:h-auto md:aspect-[4/3] ${isFlipped ? 'rotate-y-180' : ''}`} onClick={() => setIsFlipped(prev => !prev)}>
+                    <div className={`relative w-full max-w-3xl transition-all duration-500 transform-style-3d cursor-pointer group min-h-[60vh] md:min-h-[70vh] ${isFlipped ? 'rotate-y-180' : ''}`} onClick={() => setIsFlipped(prev => !prev)}>
                     {/* Front */}
                     <div className="absolute inset-0 backface-hidden bg-slate-800 border-2 border-slate-700 rounded-2xl shadow-2xl flex flex-col items-center justify-center p-8 group-hover:border-indigo-500/50 transition">
                         <span className="text-xs font-bold text-indigo-400 uppercase tracking-widest mb-4">Question</span>
-                        <p className="text-2xl md:text-3xl text-center font-medium text-slate-100 leading-relaxed overflow-y-auto max-h-[70%]">{currentCard.front}</p>
+                        <p className="text-2xl md:text-3xl text-center font-medium text-slate-100 leading-relaxed">{currentCard.front}</p>
                         <p className="mt-auto md:mt-8 text-sm text-slate-500 animate-pulse pt-4">Tap to reveal answer</p>
                     </div>
                     {/* Back */}
                     <div className="absolute inset-0 backface-hidden rotate-y-180 bg-indigo-900/20 border-2 border-indigo-500/30 rounded-2xl shadow-2xl flex flex-col items-center justify-center p-8 backdrop-blur-sm">
                         <div className="w-full h-full flex flex-col">
                             {aiExplanation && (
-                                <div className="bg-slate-900/95 p-4 rounded-xl border border-indigo-500/30 text-left overflow-y-auto max-h-[160px] animate-in slide-in-from-top-2" onClick={e => e.stopPropagation()}>
+                                <div className="bg-slate-900/95 p-4 rounded-xl border border-indigo-500/30 text-left animate-in slide-in-from-top-2" onClick={e => e.stopPropagation()}>
                                     <p className="text-xs font-bold text-indigo-400 uppercase mb-1">AI Context</p>
                                     <div className="text-sm text-slate-200 whitespace-pre-wrap">{aiExplanation}</div>
                                 </div>
@@ -690,24 +715,30 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
                                   const display = words.map((word, idx) => (idx === clozeIndex ? '____' : word)).join(' ');
                                   const isCorrect = normalizeClozeWord(clozeInput) === normalizeClozeWord(clozeWord);
                                   return (
-                                    <div className="w-full flex flex-col items-center gap-3 mb-4">
-                                      <p className="text-2xl md:text-3xl text-center font-medium text-white leading-relaxed overflow-y-auto max-h-[45%]">{display}</p>
-                                      <input
-                                        value={clozeInput}
-                                        onChange={(e) => setClozeInput(e.target.value)}
-                                        className={`w-full max-w-xs bg-slate-900 border rounded-lg px-3 py-2 text-center text-white focus:outline-none ${isCorrect ? 'border-emerald-500/60' : 'border-slate-700'}`}
-                                        placeholder="Type the missing word"
-                                        onClick={(e) => e.stopPropagation()}
-                                      />
-                                      {clozeInput && (
-                                        <div className={`text-xs font-bold uppercase tracking-widest ${isCorrect ? 'text-emerald-300' : 'text-slate-400'}`}>
-                                          {isCorrect ? 'Correct' : 'Keep trying'}
-                                        </div>
-                                      )}
+                                    <div className="w-full flex flex-col items-center gap-4 mb-4">
+                                      <div className="w-full bg-slate-900/70 border border-slate-700 rounded-xl p-4">
+                                        <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Fill in the blank</p>
+                                        <p className="text-2xl md:text-3xl text-center font-medium text-white leading-relaxed">{display}</p>
+                                      </div>
+                                      <div className="w-full max-w-sm">
+                                        <input
+                                          value={clozeInput}
+                                          onChange={(e) => setClozeInput(e.target.value)}
+                                          className={`w-full bg-slate-900 border rounded-lg px-3 py-2.5 text-center text-white focus:outline-none ${isCorrect ? 'border-emerald-500/60' : 'border-slate-700'}`}
+                                          placeholder="Type the missing word"
+                                          onKeyDown={handleClozeInputKeyDown}
+                                          onClick={(e) => e.stopPropagation()}
+                                        />
+                                        {clozeInput && (
+                                          <div className={`mt-2 text-center text-xs font-bold uppercase tracking-widest ${isCorrect ? 'text-emerald-300' : 'text-slate-400'}`}>
+                                            {isCorrect ? 'Correct' : 'Keep trying'}
+                                          </div>
+                                        )}
+                                      </div>
                                     </div>
                                   );
                                 })() : (
-                                  <p className="text-2xl md:text-3xl text-center font-medium text-white leading-relaxed overflow-y-auto max-h-[55%] mb-4">{currentCard.back}</p>
+                                  <p className="text-2xl md:text-3xl text-center font-medium text-white leading-relaxed mb-4">{currentCard.back}</p>
                                 )}
                                 
                                 <div className="mt-auto flex flex-wrap justify-center gap-3 pt-4 border-t border-white/10 w-full" onClick={(e) => e.stopPropagation()}>
@@ -762,6 +793,42 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
       onConfirm={handleConfirmAction}
       onCancel={handleCancelConfirm}
     />
+    {editingCard && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+        <div className="bg-slate-800 rounded-xl shadow-2xl w-full max-w-xl border border-slate-700 flex flex-col">
+          <div className="flex items-center justify-between p-5 border-b border-slate-700">
+            <h3 className="text-lg font-bold text-white">Edit Card</h3>
+            <button onClick={() => setEditingCard(null)} className="text-slate-400 hover:text-white transition">
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+          <div className="p-5 space-y-4">
+            <div>
+              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Front</label>
+              <textarea
+                value={editFront}
+                onChange={(e) => setEditFront(e.target.value)}
+                className="w-full bg-slate-900 border border-slate-700 text-white p-3 rounded-lg focus:ring-2 focus:ring-indigo-500 text-sm"
+                rows={3}
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Back</label>
+              <textarea
+                value={editBack}
+                onChange={(e) => setEditBack(e.target.value)}
+                className="w-full bg-slate-900 border border-slate-700 text-white p-3 rounded-lg focus:ring-2 focus:ring-indigo-500 text-sm"
+                rows={3}
+              />
+            </div>
+          </div>
+          <div className="p-5 border-t border-slate-700 flex justify-end gap-3">
+            <button onClick={() => setEditingCard(null)} className="px-4 py-2 text-slate-300 hover:text-white transition">Cancel</button>
+            <button onClick={handleEditSave} className="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg font-semibold transition">Save</button>
+          </div>
+        </div>
+      </div>
+    )}
     </>
   );
 };

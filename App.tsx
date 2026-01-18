@@ -276,6 +276,27 @@ export default function App() {
     }
   };
 
+  const autoConnectAndSync = async (newData: AppData) => {
+    if (isConnected) {
+      await triggerCloudSave(newData);
+      return;
+    }
+
+    const savedConfig = localStorage.getItem('tcf-supabase-config');
+    if (!savedConfig) return;
+
+    try {
+      const { url, key } = JSON.parse(savedConfig);
+      if (!initSupabase({ url, key })) return;
+      setIsConnected(true);
+      setSyncStatus('syncing');
+      const result = await pushData(newData);
+      setSyncStatus(result.success ? 'saved' : 'error');
+    } catch (e) {
+      console.error("Auto-connect sync error", e);
+    }
+  };
+
   const handleImport = (items: ImportItem[]) => {
     const normalize = (text: string) => text.trim().toLowerCase();
 
@@ -306,7 +327,7 @@ export default function App() {
         }
       });
       
-      triggerCloudSave(newData);
+      autoConnectAndSync(newData);
       return newData;
     });
   };
