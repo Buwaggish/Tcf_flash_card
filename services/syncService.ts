@@ -51,6 +51,7 @@ const chunkArray = <T,>(items: T[], size: number): T[][] => {
 const upsertBatches = async (table: string, rows: any[], batchSize: number) => {
     if (!supabase) throw new Error("Not connected");
     const batches = chunkArray(rows, batchSize);
+    console.log(`[sync] upsert ${table}: ${rows.length} rows in ${batches.length} batches`);
     for (const batch of batches) {
         const { error } = await supabase.from(table).upsert(batch);
         if (error) throw error;
@@ -249,70 +250,88 @@ const writeSnapshotData = async (data: AppData): Promise<void> => {
     const snapshotId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const updatedAt = new Date();
 
-    const categories = data.map(cat => ({
-        id: cat.id,
-        name: cat.name,
-        snapshot_id: snapshotId,
-        updated_at: updatedAt
-    }));
-
-    const units = data.flatMap(cat =>
-        cat.units.map(unit => ({
-            id: unit.id,
-            category_id: cat.id,
-            name: unit.name,
+    try {
+        const categories = data.map(cat => ({
+            id: cat.id,
+            name: cat.name,
             snapshot_id: snapshotId,
             updated_at: updatedAt
-        }))
-    );
+        }));
 
-    const cards = data.flatMap(cat =>
-        cat.units.flatMap(unit =>
-            unit.cards.map(card => ({
-                id: card.id,
-                unit_id: unit.id,
-                front: card.front,
-                back: card.back,
-                mastered: card.mastered,
-                srs: card.srs ?? null,
+        const units = data.flatMap(cat =>
+            cat.units.map(unit => ({
+                id: unit.id,
+                category_id: cat.id,
+                name: unit.name,
                 snapshot_id: snapshotId,
                 updated_at: updatedAt
             }))
-        )
-    );
+        );
 
-    if (categories.length > 0) {
-        await upsertBatches(CATEGORY_TABLE, categories, 500);
-    }
+        const cards = data.flatMap(cat =>
+            cat.units.flatMap(unit =>
+                unit.cards.map(card => ({
+                    id: card.id,
+                    unit_id: unit.id,
+                    front: card.front,
+                    back: card.back,
+                    mastered: card.mastered,
+                    srs: card.srs ?? null,
+                    snapshot_id: snapshotId,
+                    updated_at: updatedAt
+                }))
+            )
+        );
+        const uniqueCardIds = new Set(cards.map(card => card.id)).size;
+        console.log(`[sync] snapshot ${snapshotId} categories=${categories.length} units=${units.length} cards=${cards.length} uniqueCards=${uniqueCardIds}`);
 
-    if (units.length > 0) {
-        await upsertBatches(UNIT_TABLE, units, 500);
-    }
-
-    if (cards.length > 0) {
-        await upsertBatches(CARD_TABLE, cards, 500);
-    }
-
-    if (cards.length > 0) {
-        const { count, error } = await supabase
-            .from(CARD_TABLE)
-            .select('id', { count: 'exact', head: true })
-            .eq('snapshot_id', snapshotId);
-        if (error) throw error;
-        if ((count ?? 0) < cards.length) {
-            throw new Error(`Snapshot write incomplete: ${count ?? 0}/${cards.length}`);
+        if (categories.length > 0) {
+            await upsertBatches(CATEGORY_TABLE, categories, 500);
         }
+
+        if (units.length > 0) {
+            await upsertBatches(UNIT_TABLE, units, 500);
+        }
+
+        if (cards.length > 0) {
+            await upsertBatches(CARD_TABLE, cards, 500);
+        }
+
+        if (cards.length > 0) {
+            const { count, error } = await supabase
+                .from(CARD_TABLE)
+                .select('id', { count: 'exact', head: true })
+                .eq('snapshot_id', snapshotId);
+            if (error) throw error;
+            console.log(`[sync] snapshot ${snapshotId} card count=${count ?? 0}`);
+            if ((count ?? 0) < uniqueCardIds) {
+                throw new Error(`Snapshot write incomplete: ${count ?? 0}/${uniqueCardIds}`);
+            }
+            if (cards.length !== uniqueCardIds) {
+                console.warn(`Duplicate card IDs detected: ${cards.length - uniqueCardIds} duplicates`);
+            }
+        }
+
+        const { error: metaError } = await supabase
+            .from(META_TABLE)
+            .upsert({ key: META_KEY, value: snapshotId, updated_at: updatedAt });
+        if (metaError) throw metaError;
+
+        // Best-effort cleanup of older snapshots to avoid bloat.
+        await supabase.from(CATEGORY_TABLE).delete().neq('snapshot_id', snapshotId);
+        await supabase.from(UNIT_TABLE).delete().neq('snapshot_id', snapshotId);
+        await supabase.from(CARD_TABLE).delete().neq('snapshot_id', snapshotId);
+    } catch (error) {
+        // Cleanup partial snapshot so it won't be picked as the latest.
+        try {
+            await supabase.from(CATEGORY_TABLE).delete().eq('snapshot_id', snapshotId);
+            await supabase.from(UNIT_TABLE).delete().eq('snapshot_id', snapshotId);
+            await supabase.from(CARD_TABLE).delete().eq('snapshot_id', snapshotId);
+        } catch (cleanupError) {
+            console.error("Snapshot cleanup failed", cleanupError);
+        }
+        throw error;
     }
-
-    const { error: metaError } = await supabase
-        .from(META_TABLE)
-        .upsert({ key: META_KEY, value: snapshotId, updated_at: updatedAt });
-    if (metaError) throw metaError;
-
-    // Best-effort cleanup of older snapshots to avoid bloat.
-    await supabase.from(CATEGORY_TABLE).delete().neq('snapshot_id', snapshotId);
-    await supabase.from(UNIT_TABLE).delete().neq('snapshot_id', snapshotId);
-    await supabase.from(CARD_TABLE).delete().neq('snapshot_id', snapshotId);
 };
 
 // const migrateLegacyIfNeeded = async (): Promise<AppData | null> => {

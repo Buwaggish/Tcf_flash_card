@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { AppData, Category, Flashcard, ImportItem, ViewState } from './types';
 import { ImportModal } from './components/ImportModal';
 import { FlashcardView } from './components/FlashcardView';
@@ -24,6 +24,8 @@ export default function App() {
   // Sync Status
   const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'saved' | 'error'>('idle');
   const [isConnected, setIsConnected] = useState(false);
+  const saveInFlightRef = useRef(false);
+  const pendingSaveRef = useRef<AppData | null>(null);
 
   // Notifications
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
@@ -264,21 +266,42 @@ export default function App() {
     }
   }, [data]);
 
+  const runCloudSave = async (dataToSave: AppData) => {
+    if (saveInFlightRef.current) {
+      pendingSaveRef.current = dataToSave;
+      return;
+    }
+
+    saveInFlightRef.current = true;
+    let currentData: AppData | null = dataToSave;
+
+    try {
+      while (currentData) {
+        setSyncStatus('syncing');
+        const result = await pushData(currentData);
+        if (result.success) {
+          setSyncStatus('saved');
+        } else {
+          setSyncStatus('error');
+          break;
+        }
+        currentData = pendingSaveRef.current;
+        pendingSaveRef.current = null;
+      }
+    } finally {
+      saveInFlightRef.current = false;
+    }
+  };
+
   const triggerCloudSave = async (newData: AppData) => {
     if (isConnected) {
-        setSyncStatus('syncing');
-        const result = await pushData(newData);
-        if (result.success) {
-            setSyncStatus('saved');
-        } else {
-            setSyncStatus('error');
-        }
+      await runCloudSave(newData);
     }
   };
 
   const autoConnectAndSync = async (newData: AppData) => {
     if (isConnected) {
-      await triggerCloudSave(newData);
+      await runCloudSave(newData);
       return;
     }
 
@@ -289,9 +312,7 @@ export default function App() {
       const { url, key } = JSON.parse(savedConfig);
       if (!initSupabase({ url, key })) return;
       setIsConnected(true);
-      setSyncStatus('syncing');
-      const result = await pushData(newData);
-      setSyncStatus(result.success ? 'saved' : 'error');
+      await runCloudSave(newData);
     } catch (e) {
       console.error("Auto-connect sync error", e);
     }
