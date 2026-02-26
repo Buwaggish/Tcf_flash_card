@@ -80,3 +80,21 @@ export const speakViaLocalService = async (text: string): Promise<void> => {
     throw new Error(message || `Local TTS failed with ${response.status}`);
   }
 };
+
+/**
+ * Speaks the text via a local narration service (localhost:3000).
+ */
+export const speakViaLocalNarrationService = async (text: string): Promise<void> => {
+  const response = await fetch('http://localhost:1000/speak', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ text })
+  });
+
+  if (!response.ok) {
+    const message = await response.text().catch(() => '');
+    throw new Error(message || `Local narration failed with ${response.status}`);
+  }
+};

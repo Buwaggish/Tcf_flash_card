@@ -34,10 +34,19 @@ export interface ImportItem {
   back: string;
 }
 
+export interface LongArticle {
+  id: string;
+  title: string;
+  content: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export enum ViewState {
   HOME = 'HOME',
   CATEGORY = 'CATEGORY',
   STUDY = 'STUDY',
   STUDY_ALL = 'STUDY_ALL',
-  AUTO_PREVIEW = 'AUTO_PREVIEW'
+  AUTO_PREVIEW = 'AUTO_PREVIEW',
+  LONG_ARTICLE = 'LONG_ARTICLE'
 }

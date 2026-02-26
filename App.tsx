@@ -1,25 +1,43 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { AppData, Category, Flashcard, ImportItem, ViewState } from './types';
+import { AppData, Category, Flashcard, ImportItem, LongArticle, ViewState } from './types';
 import { ImportModal } from './components/ImportModal';
 import { FlashcardView } from './components/FlashcardView';
+import { LongArticleModal } from './components/LongArticleModal';
+import { LongArticleView } from './components/LongArticleView';
 import { SyncModal } from './components/SyncModal';
 import { ConfirmModal } from './components/ConfirmModal';
-import { Plus, BookOpen, ChevronRight, Layers, Trash2, Cloud, Loader2, CheckCircle, CloudOff, Brain, Download, Bell, BellOff, Flame, Play, Pause, Maximize2, Minimize2, Clock } from 'lucide-react';
-import { initSupabase, syncData, pullData, pushData, consolidateData, saveStudyLog, fetchTodayStudyLog } from './services/syncService';
+import { Plus, BookOpen, ChevronRight, Layers, Trash2, Cloud, Loader2, CheckCircle, CloudOff, Brain, Download, Bell, BellOff, Flame, Play, Pause, Maximize2, Minimize2, Clock, FileText, Edit2 } from 'lucide-react';
+import { initSupabase, syncData, pullData, pushData, consolidateData, saveStudyLog, fetchTodayStudyLog, fetchLongArticles, upsertLongArticle, upsertLongArticles, deleteLongArticle } from './services/syncService';
 import { isCardDue } from './services/srsService';
 
 // Simple UUID generator
 const generateId = () => Math.random().toString(36).substr(2, 9) + '-' + Date.now().toString(36);
+
+const mergeLongArticles = (base: LongArticle[], incoming: LongArticle[]) => {
+  const map = new Map<string, LongArticle>();
+  base.forEach(article => map.set(article.id, article));
+  incoming.forEach(article => {
+    const existing = map.get(article.id);
+    if (!existing || (article.updatedAt || 0) >= (existing.updatedAt || 0)) {
+      map.set(article.id, article);
+    }
+  });
+  return Array.from(map.values()).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+};
 
 export default function App() {
   const [data, setData] = useState<AppData>([]);
   const [viewState, setViewState] = useState<ViewState>(ViewState.HOME);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [selectedUnit, setSelectedUnit] = useState<string | null>(null);
+  const [longArticles, setLongArticles] = useState<LongArticle[]>([]);
+  const [selectedArticleId, setSelectedArticleId] = useState<string | null>(null);
   
   // Modals
   const [isImportOpen, setIsImportOpen] = useState(false);
   const [isSyncOpen, setIsSyncOpen] = useState(false);
+  const [isArticleModalOpen, setIsArticleModalOpen] = useState(false);
+  const [editingArticle, setEditingArticle] = useState<LongArticle | null>(null);
 
   // Sync Status
   const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'saved' | 'error'>('idle');
@@ -39,7 +57,8 @@ export default function App() {
   type ConfirmState = 
     | { type: 'resetTimer' }
     | { type: 'deleteUnit'; catIdx: number; unitIdx: number; unitName: string }
-    | { type: 'fixDuplicates' };
+    | { type: 'fixDuplicates' }
+    | { type: 'deleteArticle'; articleId: string; title: string };
   const [confirmState, setConfirmState] = useState<ConfirmState | null>(null);
 
   // --- TIMER LOGIC ---
@@ -249,6 +268,7 @@ export default function App() {
                  if (result.success && result.data) {
                      setData(result.data);
                      setSyncStatus('saved');
+                     reconcileLongArticlesWithCloud();
                  } else {
                      setSyncStatus('idle');
                  }
@@ -261,10 +281,28 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    const savedArticles = localStorage.getItem('tcf-long-articles');
+    if (savedArticles) {
+      try {
+        const parsed = JSON.parse(savedArticles);
+        if (Array.isArray(parsed)) {
+          setLongArticles(prev => mergeLongArticles(prev, parsed));
+        }
+      } catch (e) {
+        console.error("Failed to load long articles", e);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
     if (data.length > 0) {
       localStorage.setItem('tcf-cards-data', JSON.stringify(data));
     }
   }, [data]);
+
+  useEffect(() => {
+    localStorage.setItem('tcf-long-articles', JSON.stringify(longArticles));
+  }, [longArticles]);
 
   const runCloudSave = async (dataToSave: AppData) => {
     if (saveInFlightRef.current) {
@@ -318,6 +356,56 @@ export default function App() {
     }
   };
 
+  const reconcileLongArticlesWithCloud = async () => {
+    const localRaw = localStorage.getItem('tcf-long-articles');
+    let localFromStorage: LongArticle[] = [];
+    if (localRaw) {
+      try {
+        const parsed = JSON.parse(localRaw);
+        if (Array.isArray(parsed)) {
+          localFromStorage = parsed;
+        }
+      } catch (e) {
+        console.error("Failed to parse local long articles for reconcile", e);
+      }
+    }
+
+    try {
+      const remote = await fetchLongArticles();
+      const merged = mergeLongArticles(mergeLongArticles(longArticles, localFromStorage), remote);
+      if (merged.length > 0) {
+        await upsertLongArticles(merged);
+      }
+      setLongArticles(merged);
+    } catch (e) {
+      console.error("Long articles reconcile error", e);
+    }
+  };
+
+  const autoConnectAndSaveLongArticle = async (article: LongArticle) => {
+    if (isConnected) {
+      try {
+        await upsertLongArticle(article);
+      } catch (e) {
+        console.error("Cloud save long article error:", e);
+      }
+      return;
+    }
+
+    const savedConfig = localStorage.getItem('tcf-supabase-config');
+    if (!savedConfig) return;
+
+    try {
+      const { url, key } = JSON.parse(savedConfig);
+      if (!initSupabase({ url, key })) return;
+      setIsConnected(true);
+      await upsertLongArticle(article);
+      reconcileLongArticlesWithCloud();
+    } catch (e) {
+      console.error("Auto-connect long article error", e);
+    }
+  };
+
   const handleImport = (items: ImportItem[]) => {
     const normalize = (text: string) => text.trim().toLowerCase();
 
@@ -357,6 +445,7 @@ export default function App() {
       setData(newData);
       setIsConnected(true);
       setSyncStatus('saved');
+      reconcileLongArticlesWithCloud();
   };
 
   const handleDisconnect = () => {
@@ -412,6 +501,17 @@ export default function App() {
           });
       } else if (confirmState.type === 'fixDuplicates') {
           performFixDuplicates();
+      } else if (confirmState.type === 'deleteArticle') {
+          setLongArticles(prev => prev.filter(a => a.id !== confirmState.articleId));
+          if (selectedArticleId === confirmState.articleId) {
+              setSelectedArticleId(null);
+              setViewState(ViewState.HOME);
+          }
+          if (isConnected) {
+              deleteLongArticle(confirmState.articleId).catch(e => {
+                  console.error("Delete long article error:", e);
+              });
+          }
       }
       setConfirmState(null);
   };
@@ -450,6 +550,50 @@ export default function App() {
           triggerCloudSave(newData);
           return newData;
       });
+  };
+
+  const handleSaveLongArticle = (payload: { id?: string; title: string; content: string }) => {
+      const now = Date.now();
+      let savedArticle: LongArticle | null = null;
+      setLongArticles(prev => {
+          if (payload.id) {
+              const updated = prev.map(article => {
+                  if (article.id !== payload.id) return article;
+                  const next = { ...article, title: payload.title, content: payload.content, updatedAt: now };
+                  savedArticle = next;
+                  return next;
+              });
+              return updated;
+          }
+          const newArticle: LongArticle = {
+              id: generateId(),
+              title: payload.title,
+              content: payload.content,
+              createdAt: now,
+              updatedAt: now
+          };
+          savedArticle = newArticle;
+          return [newArticle, ...prev];
+      });
+      setIsArticleModalOpen(false);
+      setEditingArticle(null);
+      if (savedArticle) {
+          autoConnectAndSaveLongArticle(savedArticle);
+      }
+  };
+
+  const handleEditLongArticle = (article: LongArticle) => {
+      setEditingArticle(article);
+      setIsArticleModalOpen(true);
+  };
+
+  const handleDeleteLongArticle = (article: LongArticle) => {
+      setConfirmState({ type: 'deleteArticle', articleId: article.id, title: article.title });
+  };
+
+  const handleOpenLongArticle = (articleId: string) => {
+      setSelectedArticleId(articleId);
+      setViewState(ViewState.LONG_ARTICLE);
   };
   
   const handleExportCategory = (category: Category) => {
@@ -674,6 +818,68 @@ export default function App() {
               </div>
             ))}
           </div>
+
+          <div className="mt-8 bg-slate-800 rounded-xl border border-slate-700 overflow-hidden shadow-xl">
+            <div className="p-5 bg-slate-800/50 border-b border-slate-700 flex items-center gap-3">
+              <div className="p-2 bg-indigo-500/10 rounded-lg text-indigo-400">
+                <FileText className="w-5 h-5" />
+              </div>
+              <h2 className="text-lg font-bold text-white">Long Articles</h2>
+              <div className="ml-auto flex items-center gap-2">
+                <button
+                  onClick={() => { setEditingArticle(null); setIsArticleModalOpen(true); }}
+                  className="px-3 py-1.5 text-xs rounded bg-indigo-600 text-white hover:bg-indigo-500 transition"
+                >
+                  New Article
+                </button>
+                <span className="text-xs font-mono text-slate-500 px-2 py-1 bg-slate-900 rounded">
+                  {longArticles.length} articles
+                </span>
+              </div>
+            </div>
+
+            <div className="p-2 max-h-[320px] overflow-y-auto no-scrollbar">
+              {longArticles.length === 0 ? (
+                <div className="h-full flex flex-col items-center justify-center text-slate-500 p-8 text-center text-sm">
+                  No long articles yet.
+                </div>
+              ) : (
+                <div className="space-y-1">
+                  {longArticles.map(article => (
+                    <div
+                      key={article.id}
+                      onClick={() => handleOpenLongArticle(article.id)}
+                      className="group flex items-center justify-between p-3 rounded-lg hover:bg-slate-700/50 cursor-pointer transition border border-transparent hover:border-slate-600"
+                    >
+                      <div className="flex items-center gap-3">
+                        <BookOpen className="w-4 h-4 text-slate-500 group-hover:text-indigo-400 transition" />
+                        <span className="text-slate-300 group-hover:text-white font-medium text-sm">
+                          {article.title}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          className="p-1.5 text-slate-500 hover:text-indigo-300 hover:bg-slate-700 rounded transition"
+                          onClick={(e) => { e.stopPropagation(); handleEditLongArticle(article); }}
+                          title="Edit Article"
+                        >
+                          <Edit2 className="w-4 h-4" />
+                        </button>
+                        <button
+                          className="p-1.5 text-slate-500 hover:text-red-400 hover:bg-slate-700 rounded transition"
+                          onClick={(e) => { e.stopPropagation(); handleDeleteLongArticle(article); }}
+                          title="Delete Article"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                        <ChevronRight className="w-4 h-4 text-slate-600 group-hover:text-white transition" />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       );
   }
@@ -778,6 +984,26 @@ export default function App() {
     );
   };
 
+  const renderLongArticle = () => {
+    const article = longArticles.find(a => a.id === selectedArticleId);
+    if (!article) {
+      return (
+        <div className="flex flex-col items-center justify-center h-screen p-6 text-center">
+          <p className="text-red-400">Article not found.</p>
+          <button onClick={() => setViewState(ViewState.HOME)} className="mt-4 text-white underline">Go Home</button>
+        </div>
+      );
+    }
+
+    return (
+      <LongArticleView
+        article={article}
+        onBack={() => { setViewState(ViewState.HOME); setSelectedArticleId(null); }}
+        onCloudSave={autoConnectAndSaveLongArticle}
+      />
+    );
+  };
+
   const confirmContent = confirmState ? (() => {
       switch (confirmState.type) {
           case 'resetTimer':
@@ -801,6 +1027,13 @@ export default function App() {
                   tone: 'info' as const,
                   confirmLabel: 'Clean Now'
               };
+          case 'deleteArticle':
+              return {
+                  title: "Delete Article",
+                  message: `Delete "${confirmState.title}" permanently?`,
+                  tone: 'danger' as const,
+                  confirmLabel: 'Delete'
+              };
           default:
               return null;
       }
@@ -810,11 +1043,19 @@ export default function App() {
     <div className="min-h-screen bg-slate-900 text-slate-100 font-sans selection:bg-indigo-500/30">
       {viewState === ViewState.HOME && renderHome()}
       {(viewState === ViewState.STUDY || viewState === ViewState.STUDY_ALL || viewState === ViewState.AUTO_PREVIEW) && renderStudy()}
+      {viewState === ViewState.LONG_ARTICLE && renderLongArticle()}
       
       <ImportModal 
         isOpen={isImportOpen} 
         onClose={() => setIsImportOpen(false)} 
         onImport={handleImport} 
+      />
+
+      <LongArticleModal
+        isOpen={isArticleModalOpen}
+        onClose={() => { setIsArticleModalOpen(false); setEditingArticle(null); }}
+        onSave={handleSaveLongArticle}
+        initial={editingArticle}
       />
       
       <SyncModal

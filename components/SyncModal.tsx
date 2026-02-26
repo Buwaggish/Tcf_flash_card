@@ -155,6 +155,7 @@ export const SyncModal: React.FC<SyncModalProps> = ({
                   <li>Run SQL: <code>create table tcf_cards (id text primary key, unit_id text, front text, back text, mastered boolean, srs jsonb, snapshot_id text, updated_at timestamptz);</code></li>
                   <li>Run SQL: <code>create table tcf_sync_meta (key text primary key, value text, updated_at timestamptz);</code></li>
                   <li className="text-orange-300 mt-1">Run SQL: <code>create table study_logs (date_id text primary key, duration int, updated_at timestamptz);</code></li>
+                  <li className="text-orange-300 mt-1">Run SQL: <code>create table tcf_long_articles (id text primary key, title text, content text, created_at bigint, updated_at bigint);</code></li>
               </ol>
             </div>
           )}

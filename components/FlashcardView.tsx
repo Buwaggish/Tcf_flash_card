@@ -283,6 +283,13 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
       setPendingConfirm({ type: 'delete', card: currentCard });
   };
 
+  const handleDeleteFromList = (card: Flashcard, e: React.MouseEvent) => {
+      e.stopPropagation();
+      if (autoPreview) return;
+      if (!onDeleteCard) return;
+      setPendingConfirm({ type: 'delete', card });
+  };
+
   const handleConfirmAction = () => {
       if (!pendingConfirm) return;
       const card = pendingConfirm.card;
@@ -662,7 +669,7 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
                                      <td className="p-4 align-top text-right">
                                          <div className="flex justify-end gap-2">
                                             <button onClick={(e) => handleEditOpen(card, e)} className="p-2 text-slate-500 hover:text-indigo-300 hover:bg-slate-700 rounded-full transition" title="Edit"><Edit2 className="w-4 h-4" /></button>
-                                            <button onClick={(e) => {e.stopPropagation(); onDeleteCard && onDeleteCard(card.id)}} className="p-2 text-slate-500 hover:text-red-400 hover:bg-slate-700 rounded-full transition" title="Delete"><Trash2 className="w-4 h-4" /></button>
+                                            <button onClick={(e) => handleDeleteFromList(card, e)} className="p-2 text-slate-500 hover:text-red-400 hover:bg-slate-700 rounded-full transition" title="Delete"><Trash2 className="w-4 h-4" /></button>
                                             <button onClick={(e) => handlePlayAudio(card.back, e)} className="p-2 text-slate-500 hover:text-indigo-400 hover:bg-slate-700 rounded-full transition"><Volume2 className="w-4 h-4" /></button>
                                          </div>
                                      </td>

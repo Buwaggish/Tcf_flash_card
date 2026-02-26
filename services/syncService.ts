@@ -1,5 +1,5 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { AppData, Category, Unit, Flashcard } from '../types';
+import { AppData, Category, Unit, Flashcard, LongArticle } from '../types';
 
 let supabase: SupabaseClient | null = null;
 
@@ -11,6 +11,7 @@ const LOG_TABLE_NAME = 'study_logs';
 const CATEGORY_TABLE = 'tcf_categories';
 const UNIT_TABLE = 'tcf_units';
 const CARD_TABLE = 'tcf_cards';
+const LONG_ARTICLE_TABLE = 'tcf_long_articles';
 const META_TABLE = 'tcf_sync_meta';
 const META_KEY = 'current_snapshot';
 
@@ -30,6 +31,56 @@ export const initSupabase = (config: SyncConfig) => {
 };
 
 export const isConfigured = () => !!supabase;
+
+const toDbLongArticle = (article: LongArticle) => ({
+  id: article.id,
+  title: article.title,
+  content: article.content,
+  created_at: article.createdAt,
+  updated_at: article.updatedAt
+});
+
+const fromDbLongArticle = (row: any): LongArticle => ({
+  id: row.id,
+  title: row.title,
+  content: row.content,
+  createdAt: typeof row.created_at === 'number' ? row.created_at : Number(row.created_at),
+  updatedAt: typeof row.updated_at === 'number' ? row.updated_at : Number(row.updated_at)
+});
+
+export const fetchLongArticles = async (): Promise<LongArticle[]> => {
+  if (!supabase) return [];
+  const { data, error } = await supabase
+    .from(LONG_ARTICLE_TABLE)
+    .select('id,title,content,created_at,updated_at');
+  if (error || !data) {
+    console.error("Fetch long articles error:", error);
+    return [];
+  }
+  return data.map(fromDbLongArticle);
+};
+
+export const upsertLongArticles = async (articles: LongArticle[]) => {
+  if (!supabase) throw new Error("Not connected");
+  if (articles.length === 0) return;
+  const payload = articles.map(toDbLongArticle);
+  const { error } = await supabase.from(LONG_ARTICLE_TABLE).upsert(payload);
+  if (error) {
+    throw new Error(error.message || "Failed to save long articles");
+  }
+};
+
+export const upsertLongArticle = async (article: LongArticle) => {
+  await upsertLongArticles([article]);
+};
+
+export const deleteLongArticle = async (articleId: string) => {
+  if (!supabase) throw new Error("Not connected");
+  const { error } = await supabase.from(LONG_ARTICLE_TABLE).delete().eq('id', articleId);
+  if (error) {
+    throw new Error(error.message || "Failed to delete long article");
+  }
+};
 
 /**
  * Gets the total card count from an AppData object
