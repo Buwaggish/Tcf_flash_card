@@ -13,6 +13,8 @@ export interface Flashcard {
   srs?: SRSData; // Optional for backward compatibility
 }
 
+export type StudyMode = 'srs' | 'sequence';
+
 export interface Unit {
   id: string;
   name: string; // e.g., "Unit 1"
@@ -48,5 +50,6 @@ export enum ViewState {
   STUDY = 'STUDY',
   STUDY_ALL = 'STUDY_ALL',
   AUTO_PREVIEW = 'AUTO_PREVIEW',
-  LONG_ARTICLE = 'LONG_ARTICLE'
+  LONG_ARTICLE = 'LONG_ARTICLE',
+  ARTICLE_FLASHCARDS = 'ARTICLE_FLASHCARDS'
 }

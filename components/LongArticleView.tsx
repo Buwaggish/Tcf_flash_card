@@ -2,27 +2,25 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { LongArticle } from '../types';
 import { cancelSpeech, getFrenchVoices, speak, speakViaLocalNarrationService } from '../services/ttsService';
 import { playAzureTTS, stopAzureTTS } from '../services/azureService';
-import { ArrowLeft, Play, Pause, Square, SkipBack, SkipForward, Settings, CloudLightning, Volume2, Mic, CloudUpload } from 'lucide-react';
+import { splitIntoSentences } from '../services/textSegmentation';
+import { ConfirmModal } from './ConfirmModal';
+import { ArrowLeft, Play, Pause, Square, SkipBack, SkipForward, Settings, CloudLightning, Volume2, Mic, CloudUpload, Layers, Trash2 } from 'lucide-react';
 
 interface LongArticleViewProps {
   article: LongArticle;
   onBack: () => void;
   onCloudSave?: (article: LongArticle) => Promise<void>;
+  onStudyFlashcards?: () => void;
+  onUpdateArticle?: (payload: { id: string; title: string; content: string }) => void;
 }
 
-const splitIntoSentences = (text: string): string[] => {
-  const normalized = text.replace(/\s+/g, ' ').trim();
-  if (!normalized) return [];
-  const matches = normalized.match(/[^.!?。！？]+[.!?。！？]+|[^.!?。！？]+$/g);
-  return (matches || []).map(s => s.trim()).filter(Boolean);
-};
-
-export const LongArticleView: React.FC<LongArticleViewProps> = ({ article, onBack, onCloudSave }) => {
+export const LongArticleView: React.FC<LongArticleViewProps> = ({ article, onBack, onCloudSave, onStudyFlashcards, onUpdateArticle }) => {
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [selectedVoiceName, setSelectedVoiceName] = useState<string>('');
   const [showVoiceSettings, setShowVoiceSettings] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentIndex, setCurrentIndex] = useState(0);
+  const [pendingDeleteIndex, setPendingDeleteIndex] = useState<number | null>(null);
   type TtsMode = 'local' | 'cloud' | 'local-service' | 'cloud-save';
   const [ttsMode, setTtsMode] = useState<TtsMode>(() => {
     const saved = localStorage.getItem('tcf-long-tts-mode');
@@ -63,7 +61,15 @@ export const LongArticleView: React.FC<LongArticleViewProps> = ({ article, onBac
     setCurrentIndex(0);
     setIsPlaying(false);
     cancelSpeech();
+    setPendingDeleteIndex(null);
   }, [article.id]);
+
+  useEffect(() => {
+    setCurrentIndex(prev => {
+      if (sentences.length === 0) return 0;
+      return Math.min(prev, sentences.length - 1);
+    });
+  }, [sentences.length]);
 
   const getSelectedVoice = useCallback(() => {
     return voices.find(v => v.name === selectedVoiceName) || null;
@@ -185,68 +191,104 @@ export const LongArticleView: React.FC<LongArticleViewProps> = ({ article, onBac
     localStorage.setItem('tcf-azure-key', azureKey);
   };
 
+  const handleDeleteSentenceRequest = (index: number) => {
+    stopPlayback();
+    setPendingDeleteIndex(index);
+  };
+
+  const handleDeleteSentenceConfirm = () => {
+    if (pendingDeleteIndex === null || !onUpdateArticle) return;
+
+    const updatedSentences = sentences.filter((_, index) => index !== pendingDeleteIndex);
+    onUpdateArticle({
+      id: article.id,
+      title: article.title,
+      content: updatedSentences.join(' ')
+    });
+    setPendingDeleteIndex(null);
+  };
+
+  const handleDeleteSentenceCancel = () => setPendingDeleteIndex(null);
+  const pendingSentence = pendingDeleteIndex !== null ? sentences[pendingDeleteIndex] : null;
+
   return (
+    <>
     <div className="flex flex-col h-full max-w-4xl mx-auto w-full p-4 relative">
       <div className="flex items-center justify-between mb-6">
         <button onClick={() => { stopPlayback(); onBack(); }} className="flex items-center gap-2 text-slate-400 hover:text-white transition">
           <ArrowLeft className="w-5 h-5" />
           <span className="hidden sm:inline">Back</span>
         </button>
-        <div className="relative">
-          <button onClick={() => setShowVoiceSettings(!showVoiceSettings)} className={`p-2 rounded-lg transition ${showVoiceSettings ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}>
-            <Settings className="w-5 h-5" />
-          </button>
-          {showVoiceSettings && (
-            <div className="absolute right-0 mt-2 w-[90vw] max-w-sm md:w-96 bg-slate-800 rounded-xl border border-slate-700 p-4 z-20 shadow-2xl">
-              <div className="space-y-4">
-                <div>
-                  <label className="text-xs font-bold text-slate-400 uppercase tracking-widest">Speech Mode</label>
-                  <div className="mt-2 grid grid-cols-2 gap-2">
-                    <button
-                      onClick={() => handleTtsModeChange('local')}
-                      className={`flex-1 px-3 py-2 rounded-lg text-xs font-bold uppercase tracking-widest border transition ${ttsMode === 'local' ? 'bg-indigo-600/30 text-indigo-200 border-indigo-500/40' : 'bg-slate-900 text-slate-400 border-slate-700 hover:text-white'}`}
-                    >
-                      Local
-                    </button>
-                    <button
-                      onClick={() => handleTtsModeChange('cloud')}
-                      className={`flex-1 px-3 py-2 rounded-lg text-xs font-bold uppercase tracking-widest border transition ${ttsMode === 'cloud' ? 'bg-cyan-600/30 text-cyan-200 border-cyan-500/40' : 'bg-slate-900 text-slate-400 border-slate-700 hover:text-white'}`}
-                    >
-                      Cloud
-                    </button>
-                    <button
-                      onClick={() => handleTtsModeChange('local-service')}
-                      className={`flex-1 px-3 py-2 rounded-lg text-xs font-bold uppercase tracking-widest border transition ${ttsMode === 'local-service' ? 'bg-emerald-600/30 text-emerald-200 border-emerald-500/40' : 'bg-slate-900 text-slate-400 border-slate-700 hover:text-white'}`}
-                    >
-                      Local Service
-                    </button>
-                    <button
-                      onClick={() => handleTtsModeChange('cloud-save')}
-                      className={`flex-1 px-3 py-2 rounded-lg text-xs font-bold uppercase tracking-widest border transition ${ttsMode === 'cloud-save' ? 'bg-sky-600/30 text-sky-200 border-sky-500/40' : 'bg-slate-900 text-slate-400 border-slate-700 hover:text-white'}`}
-                    >
-                      Cloud + Save
-                    </button>
+        <div className="flex items-center gap-2">
+          {onStudyFlashcards && (
+            <button
+              onClick={() => {
+                stopPlayback();
+                onStudyFlashcards();
+              }}
+              className="flex items-center gap-2 px-3 py-2 rounded-lg border border-indigo-500/30 bg-indigo-600/10 text-indigo-200 hover:bg-indigo-600/20 transition"
+              title="Study this article as sequential flashcards"
+            >
+              <Layers className="w-4 h-4" />
+              <span className="hidden sm:inline">Flashcards</span>
+            </button>
+          )}
+          <div className="relative">
+            <button onClick={() => setShowVoiceSettings(!showVoiceSettings)} className={`p-2 rounded-lg transition ${showVoiceSettings ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}>
+              <Settings className="w-5 h-5" />
+            </button>
+            {showVoiceSettings && (
+              <div className="absolute right-0 mt-2 w-[90vw] max-w-sm md:w-96 bg-slate-800 rounded-xl border border-slate-700 p-4 z-20 shadow-2xl">
+                <div className="space-y-4">
+                  <div>
+                    <label className="text-xs font-bold text-slate-400 uppercase tracking-widest">Speech Mode</label>
+                    <div className="mt-2 grid grid-cols-2 gap-2">
+                      <button
+                        onClick={() => handleTtsModeChange('local')}
+                        className={`flex-1 px-3 py-2 rounded-lg text-xs font-bold uppercase tracking-widest border transition ${ttsMode === 'local' ? 'bg-indigo-600/30 text-indigo-200 border-indigo-500/40' : 'bg-slate-900 text-slate-400 border-slate-700 hover:text-white'}`}
+                      >
+                        Local
+                      </button>
+                      <button
+                        onClick={() => handleTtsModeChange('cloud')}
+                        className={`flex-1 px-3 py-2 rounded-lg text-xs font-bold uppercase tracking-widest border transition ${ttsMode === 'cloud' ? 'bg-cyan-600/30 text-cyan-200 border-cyan-500/40' : 'bg-slate-900 text-slate-400 border-slate-700 hover:text-white'}`}
+                      >
+                        Cloud
+                      </button>
+                      <button
+                        onClick={() => handleTtsModeChange('local-service')}
+                        className={`flex-1 px-3 py-2 rounded-lg text-xs font-bold uppercase tracking-widest border transition ${ttsMode === 'local-service' ? 'bg-emerald-600/30 text-emerald-200 border-emerald-500/40' : 'bg-slate-900 text-slate-400 border-slate-700 hover:text-white'}`}
+                      >
+                        Local Service
+                      </button>
+                      <button
+                        onClick={() => handleTtsModeChange('cloud-save')}
+                        className={`flex-1 px-3 py-2 rounded-lg text-xs font-bold uppercase tracking-widest border transition ${ttsMode === 'cloud-save' ? 'bg-sky-600/30 text-sky-200 border-sky-500/40' : 'bg-slate-900 text-slate-400 border-slate-700 hover:text-white'}`}
+                      >
+                        Cloud + Save
+                      </button>
+                    </div>
                   </div>
-                </div>
 
-                <div>
-                  <label className="text-xs font-bold text-slate-400 uppercase tracking-widest">Local Voice</label>
-                  <select value={selectedVoiceName} onChange={handleVoiceChange} className="mt-2 w-full bg-slate-900 border border-slate-700 text-slate-200 text-sm rounded-lg p-2.5">
-                    {voices.map((v) => <option key={v.name} value={v.name}>{v.name} ({v.lang})</option>)}
-                  </select>
-                </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-400 uppercase tracking-widest">Local Voice</label>
+                    <select value={selectedVoiceName} onChange={handleVoiceChange} className="mt-2 w-full bg-slate-900 border border-slate-700 text-slate-200 text-sm rounded-lg p-2.5">
+                      {voices.map((v) => <option key={v.name} value={v.name}>{v.name} ({v.lang})</option>)}
+                    </select>
+                  </div>
 
-                <div className="border-t border-slate-700 pt-4">
-                  <label className="text-xs font-bold text-cyan-400 uppercase tracking-widest">Azure Cloud</label>
-                  <div className="mt-2 grid grid-cols-2 gap-2">
-                    <input placeholder="Region" value={azureRegion} onChange={e => setAzureRegion(e.target.value)} className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-white" />
-                    <input type="password" placeholder="Key" value={azureKey} onChange={e => setAzureKey(e.target.value)} className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-white" />
-                    <button onClick={handleAzureSave} className="col-span-2 bg-cyan-600 hover:bg-cyan-500 text-white text-xs py-1 rounded">Save Azure</button>
+                  <div className="border-t border-slate-700 pt-4">
+                    <label className="text-xs font-bold text-cyan-400 uppercase tracking-widest">Azure Cloud</label>
+                    <div className="mt-2 grid grid-cols-2 gap-2">
+                      <input placeholder="Region" value={azureRegion} onChange={e => setAzureRegion(e.target.value)} className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-white" />
+                      <input type="password" placeholder="Key" value={azureKey} onChange={e => setAzureKey(e.target.value)} className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-white" />
+                      <button onClick={handleAzureSave} className="col-span-2 bg-cyan-600 hover:bg-cyan-500 text-white text-xs py-1 rounded">Save Azure</button>
+                    </div>
                   </div>
                 </div>
               </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       </div>
 
@@ -261,14 +303,28 @@ export const LongArticleView: React.FC<LongArticleViewProps> = ({ article, onBac
         ) : (
           <div className="space-y-3">
             {sentences.map((sentence, idx) => (
-              <button
+              <div
                 key={`${article.id}-${idx}`}
-                onClick={() => handleSentenceClick(idx)}
-                className={`w-full text-left p-3 rounded-lg border transition ${idx === currentIndex ? 'bg-indigo-600/20 border-indigo-500/40 text-white' : 'bg-slate-900/40 border-slate-700 text-slate-300 hover:text-white hover:border-slate-500'}`}
+                className={`flex items-start gap-2 p-2 rounded-lg border transition ${idx === currentIndex ? 'bg-indigo-600/10 border-indigo-500/40' : 'bg-slate-900/40 border-slate-700 hover:border-slate-500'}`}
               >
-                <span className="text-xs font-mono text-slate-500 mr-2">{idx + 1}.</span>
-                {sentence}
-              </button>
+                <button
+                  onClick={() => handleSentenceClick(idx)}
+                  className={`flex-1 text-left p-2 rounded-lg transition ${idx === currentIndex ? 'text-white' : 'text-slate-300 hover:text-white'}`}
+                >
+                  <span className="text-xs font-mono text-slate-500 mr-2">{idx + 1}.</span>
+                  {sentence}
+                </button>
+                {onUpdateArticle && (
+                  <button
+                    onClick={() => handleDeleteSentenceRequest(idx)}
+                    className="shrink-0 mt-1 p-2 rounded-lg text-slate-500 hover:text-red-300 hover:bg-red-500/10 transition"
+                    title="Delete this sentence"
+                    aria-label={`Delete sentence ${idx + 1}`}
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
             ))}
           </div>
         )}
@@ -307,5 +363,15 @@ export const LongArticleView: React.FC<LongArticleViewProps> = ({ article, onBac
         </div>
       </div>
     </div>
+    <ConfirmModal
+      open={pendingDeleteIndex !== null}
+      title="Delete Sentence"
+      message={pendingSentence ? `Delete this sentence from "${article.title}"?\n\n${pendingSentence}` : 'Delete this sentence?'}
+      confirmLabel="Delete Sentence"
+      tone="danger"
+      onConfirm={handleDeleteSentenceConfirm}
+      onCancel={handleDeleteSentenceCancel}
+    />
+    </>
   );
 };

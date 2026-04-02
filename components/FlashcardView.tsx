@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Flashcard } from '../types';
+import { Flashcard, StudyMode } from '../types';
 import { getFrenchVoices, speak, cancelSpeech, speakViaLocalService } from '../services/ttsService';
 import { playAzureTTS, stopAzureTTS } from '../services/azureService';
 import { generateCardContext } from '../services/geminiService';
 import { calculateNextReview, getDueDateLabel, isCardDue, getCardStatusLabel, getCardPriority, INITIAL_SRS_DATA } from '../services/srsService';
 import { ConfirmModal } from './ConfirmModal';
-import { ArrowLeft, RefreshCw, Volume2, Play, Pause, Settings, CloudLightning, Brain, CheckCircle, List, Layers, Sparkles, Loader2, Save, Key, Clock, RotateCcw, Trash2, Moon, Maximize2, Minimize2, Mic, Edit2, X } from 'lucide-react';
+import { ArrowLeft, RefreshCw, Volume2, Play, Pause, Settings, CloudLightning, Brain, CheckCircle, List, Layers, Sparkles, Loader2, Save, Key, Clock, RotateCcw, Trash2, Moon, Maximize2, Minimize2, Mic, Edit2, X, SkipBack, SkipForward } from 'lucide-react';
 
 interface FlashcardViewProps {
   cards: Flashcard[];
@@ -22,10 +22,11 @@ interface FlashcardViewProps {
   onToggleTimerPause?: () => void;
   onToggleTimerExpanded?: () => void;
   autoPreview?: boolean;
+  studyMode?: StudyMode;
 }
 
 export const FlashcardView: React.FC<FlashcardViewProps> = ({ 
-  cards, title, onBack, unitId, onUpdateCard, onDeleteCard, onStudyActivity, todayStudyTime = 0, onResetTimer, isTimerPaused = false, isTimerExpanded = false, onToggleTimerPause, onToggleTimerExpanded, autoPreview = false 
+  cards, title, onBack, unitId, onUpdateCard, onDeleteCard, onStudyActivity, todayStudyTime = 0, onResetTimer, isTimerPaused = false, isTimerExpanded = false, onToggleTimerPause, onToggleTimerExpanded, autoPreview = false, studyMode = 'srs'
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [viewMode, setViewMode] = useState<'study' | 'gallery'>('study');
@@ -38,17 +39,18 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
   const autoSessionRef = useRef(0); // prevents overlapping auto runs
   const autoRunActiveRef = useRef(false);
   const autoTimeoutsRef = useRef<number[]>([]);
+  const isSequenceMode = studyMode === 'sequence';
 
   // Queue Init
   useEffect(() => {
     const filtered = cards.filter(card => !excludedIds.has(card.id));
-    const sorted = [...filtered].sort((a, b) => {
-        const pA = getCardPriority(a);
-        const pB = getCardPriority(b);
-        if (pA !== pB) return pA - pB;
-        const dateA = a.srs?.dueDate || 0;
-        const dateB = b.srs?.dueDate || 0;
-        return dateA - dateB;
+    const sorted = isSequenceMode ? [...filtered] : [...filtered].sort((a, b) => {
+      const pA = getCardPriority(a);
+      const pB = getCardPriority(b);
+      if (pA !== pB) return pA - pB;
+      const dateA = a.srs?.dueDate || 0;
+      const dateB = b.srs?.dueDate || 0;
+      return dateA - dateB;
     });
     
     setStudyQueue(sorted);
@@ -66,11 +68,11 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
       setSessionComplete(true);
       setCurrentCard(null);
     }
-  }, [cards, excludedIds]); 
+  }, [cards, excludedIds, isSequenceMode]); 
 
   useEffect(() => {
     setExcludedIds(new Set());
-  }, [unitId]);
+  }, [unitId, studyMode]);
 
   useEffect(() => {
     if (autoPreview) {
@@ -237,7 +239,7 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
 
   const handleRate = async (grade: 'again' | 'hard' | 'good' | 'easy', e?: React.MouseEvent) => {
     e?.stopPropagation();
-    if (autoPreview) return;
+    if (autoPreview || isSequenceMode) return;
     if (!currentCard) return;
     onStudyActivity?.();
     const newSRS = calculateNextReview(currentCard.srs, grade);
@@ -271,21 +273,21 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
 
   const handleSnooze = (e: React.MouseEvent) => {
       e.stopPropagation();
-      if (autoPreview) return;
+      if (autoPreview || isSequenceMode) return;
       if (!currentCard) return;
       setPendingConfirm({ type: 'snooze', card: currentCard });
   };
 
   const handleDelete = (e: React.MouseEvent) => {
       e.stopPropagation();
-      if (autoPreview) return;
+      if (autoPreview || isSequenceMode) return;
       if (!currentCard || !onDeleteCard) return;
       setPendingConfirm({ type: 'delete', card: currentCard });
   };
 
   const handleDeleteFromList = (card: Flashcard, e: React.MouseEvent) => {
       e.stopPropagation();
-      if (autoPreview) return;
+      if (autoPreview || isSequenceMode) return;
       if (!onDeleteCard) return;
       setPendingConfirm({ type: 'delete', card });
   };
@@ -372,6 +374,58 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
       e.stopPropagation();
       onResetTimer?.();
   };
+
+  const moveSequenceToIndex = useCallback((nextIndex: number) => {
+    cancelSpeech();
+    stopAzureTTS({ silent: true });
+    setIsPlaying(false);
+    setIsFlipped(false);
+
+    if (nextIndex < 0) {
+      setCurrentCard(studyQueue[0] || null);
+      setSessionComplete(studyQueue.length === 0);
+      return;
+    }
+
+    if (nextIndex >= studyQueue.length) {
+      setCurrentCard(null);
+      setSessionComplete(true);
+      return;
+    }
+
+    setCurrentCard(studyQueue[nextIndex]);
+    setSessionComplete(false);
+  }, [studyQueue]);
+
+  const currentSequenceIndex = currentCard ? studyQueue.findIndex(card => card.id === currentCard.id) : -1;
+  const isFirstSequenceCard = currentSequenceIndex <= 0;
+  const isLastSequenceCard = currentSequenceIndex === studyQueue.length - 1;
+
+  const handleSequencePrev = useCallback((e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    if (!isSequenceMode || studyQueue.length === 0) return;
+    if (sessionComplete) {
+      moveSequenceToIndex(studyQueue.length - 1);
+      return;
+    }
+    moveSequenceToIndex(Math.max(0, currentSequenceIndex - 1));
+  }, [currentSequenceIndex, isSequenceMode, moveSequenceToIndex, sessionComplete, studyQueue.length]);
+
+  const handleSequenceNext = useCallback((e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    if (!isSequenceMode || studyQueue.length === 0) return;
+    if (sessionComplete) {
+      moveSequenceToIndex(0);
+      return;
+    }
+    moveSequenceToIndex(currentSequenceIndex + 1);
+  }, [currentSequenceIndex, isSequenceMode, moveSequenceToIndex, sessionComplete, studyQueue.length]);
+
+  const handleSequenceRestart = useCallback((e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    if (!isSequenceMode || studyQueue.length === 0) return;
+    moveSequenceToIndex(0);
+  }, [isSequenceMode, moveSequenceToIndex, studyQueue.length]);
 
   useEffect(() => {
     if (!autoPreview) {
@@ -493,7 +547,15 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
       else if (e.key.toLowerCase() === 'i') {
           currentCard && handleLocalProxyPlay(currentCard.back);
       }
-      else if (isFlipped) {
+      else if (isSequenceMode) {
+          if ((e.key === 'ArrowLeft' || e.key.toLowerCase() === 'b') && (isFlipped || sessionComplete)) {
+            e.preventDefault();
+            handleSequencePrev();
+          } else if ((e.key === 'ArrowRight' || e.key.toLowerCase() === 'n') && (isFlipped || sessionComplete)) {
+            e.preventDefault();
+            handleSequenceNext();
+          }
+      } else if (isFlipped) {
           // SRS shortcuts: 1-4 OR q,w,e,r
           if (e.key === '1' || e.key.toLowerCase() === 'q') handleRate('again');
           else if (e.key === '2' || e.key.toLowerCase() === 'w') handleRate('hard');
@@ -503,10 +565,11 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isFlipped, handlePlayAudio, handleCloudPlay, currentCard, viewMode]);
+  }, [currentCard, handleCloudPlay, handleLocalProxyPlay, handlePlayAudio, handleRate, handleSequenceNext, handleSequencePrev, isFlipped, isSequenceMode, sessionComplete, viewMode]);
 
   const isFrenchLong = currentCard ? currentCard.back.split(' ').length > 4 : false;
   const isDue = currentCard ? isCardDue(currentCard) : false;
+  const queueBadgeLabel = isSequenceMode ? `${studyQueue.length} Steps` : `${studyQueue.length} Queue`;
   const nextAgain = currentCard ? calculateNextReview(currentCard.srs, 'again') : null;
   const nextHard = currentCard ? calculateNextReview(currentCard.srs, 'hard') : null;
   const nextGood = currentCard ? calculateNextReview(currentCard.srs, 'good') : null;
@@ -577,8 +640,8 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
              </button>
           </div>
           <div className="hidden md:flex items-center gap-2 px-3 py-1 bg-slate-800 rounded-full border border-slate-700">
-             <Brain className={`w-4 h-4 ${isDue ? 'text-orange-400' : 'text-green-400'}`} />
-             <span className="text-slate-300 text-xs font-mono">{studyQueue.length} Queue</span>
+             <Brain className={`w-4 h-4 ${isSequenceMode ? 'text-amber-300' : isDue ? 'text-orange-400' : 'text-green-400'}`} />
+             <span className="text-slate-300 text-xs font-mono">{queueBadgeLabel}</span>
           </div>
           <button
             onClick={() => setIsClozeMode(prev => !prev)}
@@ -636,6 +699,12 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
          </div>
       )}
 
+      {isSequenceMode && !autoPreview && (
+         <div className="mb-3 px-4 py-2 bg-amber-900/30 border border-amber-500/30 rounded-lg text-sm text-amber-100">
+            Sequence mode keeps the article in fixed order for structured speaking practice. It does not use SRS and does not modify your saved cards.
+         </div>
+      )}
+
       <div className="text-center mb-4 shrink-0"><h2 className="text-xl font-bold text-white">{title}</h2></div>
 
       {viewMode === 'gallery' ? (
@@ -644,32 +713,42 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
                  <table className="w-full text-left border-collapse">
                      <thead className="bg-slate-900 sticky top-0 z-10 shadow-lg">
                          <tr>
-                             <th className="p-4 text-xs font-bold text-slate-400 uppercase tracking-wider">Status</th>
+                             <th className="p-4 text-xs font-bold text-slate-400 uppercase tracking-wider">{isSequenceMode ? 'Step' : 'Status'}</th>
                              <th className="p-4 text-xs font-bold text-slate-400 uppercase tracking-wider">Question</th>
                              <th className="p-4 text-xs font-bold text-slate-400 uppercase tracking-wider">Answer</th>
                              <th className="p-4 text-xs font-bold text-slate-400 uppercase tracking-wider text-right">Action</th>
                          </tr>
                      </thead>
                      <tbody className="divide-y divide-slate-700">
-                         {cards.map(card => {
+                         {cards.map((card, index) => {
                              const status = getCardStatusLabel(card);
                              return (
                                  <tr key={card.id} className="hover:bg-slate-700/50 transition group">
                                      <td className="p-4 align-top w-32">
-                                         <span className={`inline-block px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wide border ${
-                                             status.type === 'new' ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' :
-                                             status.type === 'due' ? 'bg-orange-500/10 text-orange-400 border-orange-500/20' :
-                                             'bg-green-500/10 text-green-400 border-green-500/20'
-                                         }`}>
-                                             {status.label}
-                                         </span>
+                                         {isSequenceMode ? (
+                                           <span className="inline-block px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wide border bg-amber-500/10 text-amber-300 border-amber-500/20">
+                                             {index + 1} / {cards.length}
+                                           </span>
+                                         ) : (
+                                           <span className={`inline-block px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wide border ${
+                                               status.type === 'new' ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' :
+                                               status.type === 'due' ? 'bg-orange-500/10 text-orange-400 border-orange-500/20' :
+                                               'bg-green-500/10 text-green-400 border-green-500/20'
+                                           }`}>
+                                               {status.label}
+                                           </span>
+                                         )}
                                      </td>
                                      <td className="p-4 align-top text-slate-300 font-medium">{card.front}</td>
                                      <td className="p-4 align-top text-white">{card.back}</td>
                                      <td className="p-4 align-top text-right">
                                          <div className="flex justify-end gap-2">
-                                            <button onClick={(e) => handleEditOpen(card, e)} className="p-2 text-slate-500 hover:text-indigo-300 hover:bg-slate-700 rounded-full transition" title="Edit"><Edit2 className="w-4 h-4" /></button>
-                                            <button onClick={(e) => handleDeleteFromList(card, e)} className="p-2 text-slate-500 hover:text-red-400 hover:bg-slate-700 rounded-full transition" title="Delete"><Trash2 className="w-4 h-4" /></button>
+                                            {!isSequenceMode && (
+                                              <button onClick={(e) => handleEditOpen(card, e)} className="p-2 text-slate-500 hover:text-indigo-300 hover:bg-slate-700 rounded-full transition" title="Edit"><Edit2 className="w-4 h-4" /></button>
+                                            )}
+                                            {!isSequenceMode && (
+                                              <button onClick={(e) => handleDeleteFromList(card, e)} className="p-2 text-slate-500 hover:text-red-400 hover:bg-slate-700 rounded-full transition" title="Delete"><Trash2 className="w-4 h-4" /></button>
+                                            )}
                                             <button onClick={(e) => handlePlayAudio(card.back, e)} className="p-2 text-slate-500 hover:text-indigo-400 hover:bg-slate-700 rounded-full transition"><Volume2 className="w-4 h-4" /></button>
                                          </div>
                                      </td>
@@ -686,13 +765,29 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
             {(sessionComplete || !currentCard) ? (
                 <div className="flex-1 flex flex-col items-center justify-center p-6 text-center animate-in fade-in zoom-in-95">
                     <CheckCircle className="w-16 h-16 text-green-400 mb-4" />
-                    <h2 className="text-2xl font-bold text-white mb-2">{autoPreview ? 'Auto display finished' : "You're all caught up!"}</h2>
+                    <h2 className="text-2xl font-bold text-white mb-2">
+                      {autoPreview ? 'Auto display finished' : isSequenceMode ? 'Sequence complete' : "You're all caught up!"}
+                    </h2>
                     <p className="text-slate-400 mb-8 max-w-md">
                       {autoPreview 
                         ? 'All new or due cards in this set have been previewed. No progress was recorded.'
-                        : 'You have reviewed all cards currently due in this queue. Check back later or switch to Gallery Mode to see all words.'}
+                        : isSequenceMode
+                          ? 'You reached the end of the article in order. Restart the sequence to rehearse the structure again, or go back to the article view.'
+                          : 'You have reviewed all cards currently due in this queue. Check back later or switch to Gallery Mode to see all words.'}
                     </p>
-                    <button onClick={onBack} className="bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-3 rounded-lg font-medium shadow-lg shadow-indigo-500/20 transition">Back to Dashboard</button>
+                    <div className="flex flex-wrap justify-center gap-3">
+                      {isSequenceMode && (
+                        <button
+                          onClick={handleSequenceRestart}
+                          className="bg-amber-500/10 hover:bg-amber-500/20 text-amber-100 border border-amber-500/30 px-6 py-3 rounded-lg font-medium transition"
+                        >
+                          Restart Sequence
+                        </button>
+                      )}
+                      <button onClick={onBack} className="bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-3 rounded-lg font-medium shadow-lg shadow-indigo-500/20 transition">
+                        {isSequenceMode ? 'Back to Article' : 'Back to Dashboard'}
+                      </button>
+                    </div>
                 </div>
             ) : (
                 <>
@@ -700,7 +795,7 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
                     <div className={`relative w-full max-w-3xl transition-all duration-500 transform-style-3d cursor-pointer group min-h-[60vh] md:min-h-[70vh] ${isFlipped ? 'rotate-y-180' : ''}`} onClick={() => setIsFlipped(prev => !prev)}>
                     {/* Front */}
                     <div className="absolute inset-0 backface-hidden bg-slate-800 border-2 border-slate-700 rounded-2xl shadow-2xl flex flex-col items-center justify-center p-8 group-hover:border-indigo-500/50 transition">
-                        <span className="text-xs font-bold text-indigo-400 uppercase tracking-widest mb-4">Question</span>
+                        <span className="text-xs font-bold text-indigo-400 uppercase tracking-widest mb-4">{isSequenceMode ? `Sentence ${currentSequenceIndex + 1} of ${studyQueue.length}` : 'Question'}</span>
                         <p className="text-2xl md:text-3xl text-center font-medium text-slate-100 leading-relaxed">{currentCard.front}</p>
                         <p className="mt-auto md:mt-8 text-sm text-slate-500 animate-pulse pt-4">Tap to reveal answer</p>
                     </div>
@@ -714,7 +809,7 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
                                 </div>
                             )}
                             <div className={`flex-1 w-full flex flex-col items-center ${aiExplanation ? 'mt-4' : ''}`}>
-                                <span className="text-xs font-bold text-indigo-400 uppercase tracking-widest mb-4">Réponse</span>
+                                <span className="text-xs font-bold text-indigo-400 uppercase tracking-widest mb-4">{isSequenceMode ? `Check Sentence ${currentSequenceIndex + 1}` : 'Réponse'}</span>
                                 {isClozeMode ? (() => {
                                   const words = currentCard.back.split(' ').filter(Boolean);
                                   const clozeIndex = getClozeIndex(currentCard.id, words);
@@ -754,7 +849,7 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
                                 <button onClick={(e) => handleLocalProxyPlay(currentCard.back, e)} disabled={isPlaying} title="Play Siri Proxy (I)" className="p-3 rounded-full shadow-lg bg-emerald-600 hover:bg-emerald-500 text-white">{isPlaying ? <RefreshCw className="w-5 h-5 animate-spin" /> : <Mic className="w-5 h-5" />}</button>
                                 <button onClick={handleAiExplain} disabled={isGeneratingAi} className={`p-3 rounded-full shadow-lg transition ${isGeneratingAi ? 'bg-slate-600' : 'bg-violet-600 hover:bg-violet-500'} text-white`} title="Explain with AI">{isGeneratingAi ? <Loader2 className="w-5 h-5 animate-spin" /> : <Sparkles className="w-5 h-5" />}</button>
                                 {isFrenchLong && <button onClick={(e) => handlePlaySequence(currentCard.back, e)} disabled={isPlaying} className="p-3 bg-slate-700 hover:bg-slate-600 rounded-full text-white shadow-lg" title="Slow Mode"><Play className="w-5 h-5" /></button>}
-                                {!autoPreview && (
+                                {!autoPreview && !isSequenceMode && (
                                   <div className="w-full flex justify-center gap-4 mt-2 border-t border-white/10 pt-2">
                                       <button onClick={handleSnooze} className="text-slate-400 hover:text-indigo-300 text-xs flex items-center gap-1"><Moon className="w-3 h-3" /> Snooze 30d</button>
                                       <button onClick={handleDelete} className="text-slate-400 hover:text-red-400 text-xs flex items-center gap-1"><Trash2 className="w-3 h-3" /> Delete</button>
@@ -770,6 +865,36 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
                     {autoPreview ? (
                         <div className="h-full flex items-center justify-center text-cyan-100 text-sm bg-cyan-900/10 border border-cyan-500/20 rounded-lg">
                             Auto display will advance after 1 minute per card. Progress is not recorded.
+                        </div>
+                    ) : isSequenceMode ? (
+                        <div className="grid grid-cols-3 gap-2 md:gap-4 h-full">
+                            <button
+                              onClick={handleSequencePrev}
+                              disabled={studyQueue.length === 0 || (!sessionComplete && isFirstSequenceCard)}
+                              className="flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl transition disabled:opacity-40 disabled:hover:bg-slate-800"
+                              title="Previous sentence (Left / B)"
+                            >
+                              <SkipBack className="w-4 h-4" />
+                              <span className="text-xs text-slate-200 font-bold uppercase">Previous</span>
+                            </button>
+                            <button
+                              onClick={handleSequenceRestart}
+                              disabled={studyQueue.length === 0}
+                              className="flex items-center justify-center gap-2 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 rounded-xl transition disabled:opacity-40"
+                              title="Restart sequence"
+                            >
+                              <RotateCcw className="w-4 h-4 text-amber-300" />
+                              <span className="text-xs text-amber-200 font-bold uppercase">Restart</span>
+                            </button>
+                            <button
+                              onClick={handleSequenceNext}
+                              disabled={studyQueue.length === 0 || !isFlipped}
+                              className="flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-500 border border-indigo-500/50 rounded-xl transition disabled:opacity-40 disabled:hover:bg-indigo-600"
+                              title="Next sentence (Right / N)"
+                            >
+                              <span className="text-xs text-white font-bold uppercase">{isLastSequenceCard ? 'Finish' : 'Next'}</span>
+                              <SkipForward className="w-4 h-4 text-white" />
+                            </button>
                         </div>
                     ) : isFlipped ? (
                         <div className="grid grid-cols-4 gap-2 md:gap-4 h-full">

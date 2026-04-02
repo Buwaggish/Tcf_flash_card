@@ -9,6 +9,7 @@ import { ConfirmModal } from './components/ConfirmModal';
 import { Plus, BookOpen, ChevronRight, Layers, Trash2, Cloud, Loader2, CheckCircle, CloudOff, Brain, Download, Bell, BellOff, Flame, Play, Pause, Maximize2, Minimize2, Clock, FileText, Edit2 } from 'lucide-react';
 import { initSupabase, syncData, pullData, pushData, consolidateData, saveStudyLog, fetchTodayStudyLog, fetchLongArticles, upsertLongArticle, upsertLongArticles, deleteLongArticle } from './services/syncService';
 import { isCardDue } from './services/srsService';
+import { splitIntoSentences } from './services/textSegmentation';
 
 // Simple UUID generator
 const generateId = () => Math.random().toString(36).substr(2, 9) + '-' + Date.now().toString(36);
@@ -23,6 +24,25 @@ const mergeLongArticles = (base: LongArticle[], incoming: LongArticle[]) => {
     }
   });
   return Array.from(map.values()).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+};
+
+const buildArticleSequenceCards = (article: LongArticle): Flashcard[] => {
+  const sentences = splitIntoSentences(article.content);
+
+  return sentences.map((sentence, index) => {
+    const isFirst = index === 0;
+    const previousSentence = sentences[index - 1];
+    const prompt = isFirst
+      ? `Opening sentence\n\nStart your response for "${article.title}". What is the first sentence?`
+      : `Sentence ${index + 1} of ${sentences.length}\n\nPrevious sentence:\n${previousSentence}\n\nWhat comes next?`;
+
+    return {
+      id: `article-sequence-${article.id}-${String(index + 1).padStart(4, '0')}`,
+      front: prompt,
+      back: sentence,
+      mastered: false
+    };
+  });
 };
 
 export default function App() {
@@ -595,6 +615,11 @@ export default function App() {
       setSelectedArticleId(articleId);
       setViewState(ViewState.LONG_ARTICLE);
   };
+
+  const handleOpenArticleFlashcards = (articleId: string) => {
+      setSelectedArticleId(articleId);
+      setViewState(ViewState.ARTICLE_FLASHCARDS);
+  };
   
   const handleExportCategory = (category: Category) => {
       const exportItems: ImportItem[] = [];
@@ -859,6 +884,13 @@ export default function App() {
                       </div>
                       <div className="flex items-center gap-2">
                         <button
+                          className="px-2 py-1 text-xs rounded bg-amber-600/20 text-amber-100 border border-amber-500/30 hover:bg-amber-600/30 transition"
+                          onClick={(e) => { e.stopPropagation(); handleOpenArticleFlashcards(article.id); }}
+                          title="Study as sequential flashcards"
+                        >
+                          Sequence
+                        </button>
+                        <button
                           className="p-1.5 text-slate-500 hover:text-indigo-300 hover:bg-slate-700 rounded transition"
                           onClick={(e) => { e.stopPropagation(); handleEditLongArticle(article); }}
                           title="Edit Article"
@@ -1000,6 +1032,55 @@ export default function App() {
         article={article}
         onBack={() => { setViewState(ViewState.HOME); setSelectedArticleId(null); }}
         onCloudSave={autoConnectAndSaveLongArticle}
+        onStudyFlashcards={() => handleOpenArticleFlashcards(article.id)}
+        onUpdateArticle={handleSaveLongArticle}
+      />
+    );
+  };
+
+  const renderArticleFlashcards = () => {
+    const article = longArticles.find(a => a.id === selectedArticleId);
+    if (!article) {
+      return (
+        <div className="flex flex-col items-center justify-center h-screen p-6 text-center">
+          <p className="text-red-400">Article not found.</p>
+          <button onClick={() => setViewState(ViewState.HOME)} className="mt-4 text-white underline">Go Home</button>
+        </div>
+      );
+    }
+
+    const cardsToStudy = buildArticleSequenceCards(article);
+
+    if (cardsToStudy.length === 0) {
+      return (
+        <div className="flex flex-col items-center justify-center h-screen p-6 text-center">
+          <p className="text-slate-300 text-xl font-semibold">No sentences found</p>
+          <p className="text-slate-400 mt-2 max-w-md">Add punctuation to the article and try again. The sequence flashcards are generated sentence by sentence.</p>
+          <button
+            onClick={() => setViewState(ViewState.LONG_ARTICLE)}
+            className="mt-6 bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-3 rounded-lg font-medium shadow-lg transition"
+          >
+            Back to Article
+          </button>
+        </div>
+      );
+    }
+
+    return (
+      <FlashcardView
+        cards={cardsToStudy}
+        title={`${article.title} (Sequential Flashcards)`}
+        onBack={() => setViewState(ViewState.LONG_ARTICLE)}
+        unitId={`article-sequence-${article.id}`}
+        onUpdateCard={() => {}}
+        onStudyActivity={handleStudyActivity}
+        todayStudyTime={todayStudyTime}
+        onResetTimer={handleResetTimer}
+        isTimerPaused={isTimerPaused}
+        isTimerExpanded={isTimerExpanded}
+        onToggleTimerPause={toggleTimerPause}
+        onToggleTimerExpanded={toggleTimerExpanded}
+        studyMode="sequence"
       />
     );
   };
@@ -1044,6 +1125,7 @@ export default function App() {
       {viewState === ViewState.HOME && renderHome()}
       {(viewState === ViewState.STUDY || viewState === ViewState.STUDY_ALL || viewState === ViewState.AUTO_PREVIEW) && renderStudy()}
       {viewState === ViewState.LONG_ARTICLE && renderLongArticle()}
+      {viewState === ViewState.ARTICLE_FLASHCARDS && renderArticleFlashcards()}
       
       <ImportModal 
         isOpen={isImportOpen} 
