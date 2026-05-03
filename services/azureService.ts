@@ -44,7 +44,7 @@ export const playAzureTTS = async (
 
   const ssml = `
     <speak version='1.0' xml:lang='fr-CA'>
-      <voice xml:lang='fr-CA' xml:gender='Male' name='fr-CA-AntoineNeural'>
+      <voice xml:lang='fr-CA' xml:gender='Female' name='fr-FR-VivienneMultilingualNeural'>
         ${text}
       </voice>
     </speak>
