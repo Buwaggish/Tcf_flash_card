@@ -181,6 +181,32 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
       }
   }, [isPlaying, azureRegion, azureKey]);
 
+  const handleListPlayAudio = useCallback(async (text: string, e?: React.MouseEvent) => {
+      e?.stopPropagation();
+      if (isPlaying) return;
+
+      try {
+          setIsPlaying(true);
+          cancelSpeech();
+          stopAzureTTS({ silent: true });
+
+          if (azureRegion && azureKey) {
+              try {
+                  await playAzureTTS(text, azureRegion, azureKey);
+                  return;
+              } catch (err) {
+                  console.error("List Azure playback error; falling back to local voice", err);
+              }
+          }
+
+          await speak(text, getSelectedVoice());
+      } catch (err) {
+          console.error("List playback error", err);
+      } finally {
+          setIsPlaying(false);
+      }
+  }, [isPlaying, azureRegion, azureKey, getSelectedVoice]);
+
   const handleLocalProxyPlay = useCallback(async (text: string, e?: React.MouseEvent) => {
       e?.stopPropagation();
       if (isPlaying) return;
@@ -749,7 +775,7 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
                                             {!isSequenceMode && (
                                               <button onClick={(e) => handleDeleteFromList(card, e)} className="p-2 text-slate-500 hover:text-red-400 hover:bg-slate-700 rounded-full transition" title="Delete"><Trash2 className="w-4 h-4" /></button>
                                             )}
-                                            <button onClick={(e) => handlePlayAudio(card.back, e)} className="p-2 text-slate-500 hover:text-indigo-400 hover:bg-slate-700 rounded-full transition"><Volume2 className="w-4 h-4" /></button>
+                                            <button onClick={(e) => handleListPlayAudio(card.back, e)} className="p-2 text-slate-500 hover:text-indigo-400 hover:bg-slate-700 rounded-full transition" title={azureRegion && azureKey ? 'Play Azure voice' : 'Play local voice'}><Volume2 className="w-4 h-4" /></button>
                                          </div>
                                      </td>
                                  </tr>
