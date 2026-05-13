@@ -1,20 +1,31 @@
 let currentAudio: HTMLAudioElement | null = null;
 let currentUrl: string | null = null;
 let currentReject: ((reason?: any) => void) | null = null;
+
+const getAudioElement = () => {
+  if (!currentAudio) {
+    currentAudio = new Audio();
+    currentAudio.preload = 'auto';
+    currentAudio.setAttribute('playsinline', 'true');
+    currentAudio.setAttribute('webkit-playsinline', 'true');
+  }
+  return currentAudio;
+};
+
 const clearAudio = () => {
   if (currentUrl) {
     URL.revokeObjectURL(currentUrl);
   }
-  currentAudio = null;
   currentUrl = null;
   currentReject = null;
 };
 
 export const stopAzureTTS = (options?: { silent?: boolean }) => {
-  if (currentAudio) {
+  const audio = currentAudio;
+  if (audio) {
     try {
-      currentAudio.pause();
-      currentAudio.currentTime = 0;
+      audio.pause();
+      audio.currentTime = 0;
     } catch (e) {
       console.error("Failed to stop Azure TTS", e);
     }
@@ -68,13 +79,12 @@ export const playAzureTTS = async (
 
   const blob = await response.blob();
   const audioUrl = URL.createObjectURL(blob);
-  const audio = new Audio(audioUrl);
-  audio.setAttribute('playsinline', 'true');
-  audio.setAttribute('webkit-playsinline', 'true');
 
   // Stop any existing playback quietly before starting a new one
   stopAzureTTS({ silent: true });
-  clearAudio();
+  const audio = getAudioElement();
+  audio.src = audioUrl;
+  audio.load();
   currentAudio = audio;
   currentUrl = audioUrl;
 
