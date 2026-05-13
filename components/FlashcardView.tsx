@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Flashcard, StudyMode } from '../types';
 import { getFrenchVoices, speak, cancelSpeech, speakViaLocalService } from '../services/ttsService';
-import { playAzureTTS, stopAzureTTS } from '../services/azureService';
+import { playAzureTTS, stopAzureTTS, unlockAzureAudioPlayback } from '../services/azureService';
 import { generateCardContext } from '../services/geminiService';
 import { calculateNextReview, getDueDateLabel, isCardDue, getCardStatusLabel, getCardPriority, INITIAL_SRS_DATA } from '../services/srsService';
 import { ConfirmModal } from './ConfirmModal';
@@ -167,6 +167,7 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
           setIsFlipped(true);
           cancelSpeech();
           stopAzureTTS({ silent: true });
+          await unlockAzureAudioPlayback();
           await Promise.race([
             playAzureTTS(currentCard.back, azureRegion, azureKey, { resolveOnStart: true }),
             new Promise<void>((_, reject) => {
