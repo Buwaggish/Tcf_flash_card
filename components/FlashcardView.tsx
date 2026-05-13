@@ -99,6 +99,10 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
   const [isGeneratingAi, setIsGeneratingAi] = useState(false);
   const [isClozeMode, setIsClozeMode] = useState(false);
   const [autoPlaybackStarted, setAutoPlaybackStarted] = useState(false);
+  const [autoAdvanceSeconds, setAutoAdvanceSeconds] = useState(() => {
+    const saved = Number(localStorage.getItem('tcf-auto-advance-seconds'));
+    return Number.isFinite(saved) && saved >= 5 ? Math.min(600, Math.round(saved)) : 60;
+  });
   const [clozeInput, setClozeInput] = useState('');
   const clozeIndexMapRef = useRef<Map<string, number>>(new Map());
   const [editingCard, setEditingCard] = useState<Flashcard | null>(null);
@@ -151,6 +155,15 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
       localStorage.setItem('tcf-azure-key', azureKey);
       setShowAzureSettings(false);
       alert("Azure settings saved.");
+  };
+
+  const handleAutoAdvanceSecondsChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const parsed = Number(e.target.value);
+      if (!Number.isFinite(parsed)) return;
+
+      const nextSeconds = Math.max(5, Math.min(600, Math.round(parsed)));
+      setAutoAdvanceSeconds(nextSeconds);
+      localStorage.setItem('tcf-auto-advance-seconds', String(nextSeconds));
   };
 
   const handleStartAutoPlayback = async (e: React.MouseEvent) => {
@@ -580,7 +593,8 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
         }
       };
 
-      const advanceAt = Date.now() + 60000;
+      const autoAdvanceMs = autoAdvanceSeconds * 1000;
+      const advanceAt = Date.now() + autoAdvanceMs;
       const advanceIfReady = (force = false) => {
         if (advanced || cancelled || sessionId !== autoSessionRef.current) {
           autoRunActiveRef.current = false;
@@ -610,11 +624,13 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
       if (autoStartedCardIdRef.current !== currentCard.id) {
         schedule(0, playOnce);
       }
-      schedule(10000, playOnce);
+      if (autoAdvanceMs > 10000) {
+        schedule(10000, playOnce);
+      }
 
-      // Advance after full minute. The interval and page events make this more reliable on iPad/Safari,
+      // Advance after the selected interval. The interval and page events make this more reliable on iPad/Safari,
       // where long timers can be delayed when the page is throttled.
-      schedule(60000, () => advanceIfReady(true));
+      schedule(autoAdvanceMs, () => advanceIfReady(true));
       const watchdogId = window.setInterval(() => advanceIfReady(), 1000);
       autoTimeoutsRef.current.push(watchdogId);
       const handlePageResume = () => advanceIfReady();
@@ -811,11 +827,26 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
 
       {autoPreview && (
          <div className="mb-3 px-4 py-2 bg-cyan-900/40 border border-cyan-500/40 rounded-lg text-sm text-cyan-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-            <span>
-              {autoPlaybackStarted
-                ? 'Auto display is running. Each card will cloud-read twice with 10s between, then wait the rest of 1 minute before moving on without changing progress.'
-                : 'Tap Start Auto Pronunciation to allow audio playback on iPhone/iPad.'}
-            </span>
+            <div className="flex flex-col gap-2">
+              <span>
+                {autoPlaybackStarted
+                  ? `Auto display is running. Cards advance every ${autoAdvanceSeconds}s without changing progress.`
+                  : 'Tap Start Auto Pronunciation to allow audio playback on iPhone/iPad.'}
+              </span>
+              <label className="flex items-center gap-2 text-xs text-cyan-100/90" onClick={(e) => e.stopPropagation()}>
+                <span className="font-bold uppercase tracking-wider">Advance</span>
+                <input
+                  type="number"
+                  min={5}
+                  max={600}
+                  step={1}
+                  value={autoAdvanceSeconds}
+                  onChange={handleAutoAdvanceSecondsChange}
+                  className="w-20 bg-slate-950/70 border border-cyan-500/30 rounded px-2 py-1 text-white focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                />
+                <span>seconds</span>
+              </label>
+            </div>
             {!autoPlaybackStarted && (
               <button
                 onClick={handleStartAutoPlayback}
