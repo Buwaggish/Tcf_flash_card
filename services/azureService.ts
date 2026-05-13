@@ -1,11 +1,6 @@
 let currentAudio: HTMLAudioElement | null = null;
 let currentUrl: string | null = null;
 let currentReject: ((reason?: any) => void) | null = null;
-let audioUnlocked = false;
-
-const SILENT_WAV =
-  "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=";
-
 const clearAudio = () => {
   if (currentUrl) {
     URL.revokeObjectURL(currentUrl);
@@ -13,24 +8,6 @@ const clearAudio = () => {
   currentAudio = null;
   currentUrl = null;
   currentReject = null;
-};
-
-export const unlockAzureAudioPlayback = async (): Promise<void> => {
-  if (audioUnlocked) return;
-
-  const audio = new Audio(SILENT_WAV);
-  audio.volume = 0.01;
-  audio.setAttribute('playsinline', 'true');
-  audio.setAttribute('webkit-playsinline', 'true');
-
-  try {
-    await audio.play();
-    audio.pause();
-    audio.currentTime = 0;
-    audioUnlocked = true;
-  } catch (err) {
-    console.warn("Audio unlock failed; continuing with normal playback", err);
-  }
 };
 
 export const stopAzureTTS = (options?: { silent?: boolean }) => {
@@ -56,7 +33,8 @@ export const stopAzureTTS = (options?: { silent?: boolean }) => {
 export const playAzureTTS = async (
   text: string,
   region: string,
-  key: string
+  key: string,
+  options?: { resolveOnStart?: boolean }
 ): Promise<void> => {
   if (!region || !key) {
     throw new Error("Azure configuration missing");
@@ -115,10 +93,16 @@ export const playAzureTTS = async (
 
     const playPromise = audio.play();
     if (playPromise !== undefined) {
-      playPromise.catch(err => {
+      playPromise.then(() => {
+        if (options?.resolveOnStart) {
+          resolve();
+        }
+      }).catch(err => {
         clearAudio();
         reject(err);
       });
+    } else if (options?.resolveOnStart) {
+      resolve();
     }
   });
 };

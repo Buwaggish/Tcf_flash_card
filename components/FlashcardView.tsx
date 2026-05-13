@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Flashcard, StudyMode } from '../types';
 import { getFrenchVoices, speak, cancelSpeech, speakViaLocalService } from '../services/ttsService';
-import { playAzureTTS, stopAzureTTS, unlockAzureAudioPlayback } from '../services/azureService';
+import { playAzureTTS, stopAzureTTS } from '../services/azureService';
 import { generateCardContext } from '../services/geminiService';
 import { calculateNextReview, getDueDateLabel, isCardDue, getCardStatusLabel, getCardPriority, INITIAL_SRS_DATA } from '../services/srsService';
 import { ConfirmModal } from './ConfirmModal';
@@ -39,6 +39,7 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
   const autoSessionRef = useRef(0); // prevents overlapping auto runs
   const autoRunActiveRef = useRef(false);
   const autoTimeoutsRef = useRef<number[]>([]);
+  const autoStartedCardIdRef = useRef<string | null>(null);
   const isSequenceMode = studyMode === 'sequence';
   const isAppleTouchDevice = typeof navigator !== 'undefined' && (
     /iPad|iPhone|iPod/.test(navigator.userAgent) ||
@@ -113,6 +114,7 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
   useEffect(() => {
     if (!autoPreview) {
       setAutoPlaybackStarted(false);
+      autoStartedCardIdRef.current = null;
       return;
     }
 
@@ -158,13 +160,27 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
           setShowAzureSettings(true);
           return;
       }
+      if (!currentCard) return;
 
       try {
           setIsPlaying(true);
-          await unlockAzureAudioPlayback();
+          setIsFlipped(true);
+          cancelSpeech();
+          stopAzureTTS({ silent: true });
+          await Promise.race([
+            playAzureTTS(currentCard.back, azureRegion, azureKey, { resolveOnStart: true }),
+            new Promise<void>((_, reject) => {
+              window.setTimeout(() => reject(new Error("Auto playback start timed out")), 25000);
+            })
+          ]);
+          autoStartedCardIdRef.current = currentCard.id;
+          setAutoPlaybackStarted(true);
+      } catch (err) {
+          autoStartedCardIdRef.current = null;
+          console.error("Auto pronunciation start failed", err);
+          alert("Auto pronunciation could not start. Try the read button once, then start Auto again.");
       } finally {
           setIsPlaying(false);
-          setAutoPlaybackStarted(true);
       }
   };
 
@@ -589,8 +605,11 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
         autoRunActiveRef.current = false;
       };
 
-      // Two plays: immediately and after 10s
-      schedule(0, playOnce);
+      // Two plays: immediately and after 10s. On iPhone/iPad the first play can come directly
+      // from the Start button tap, so do not schedule a duplicate immediate playback for that card.
+      if (autoStartedCardIdRef.current !== currentCard.id) {
+        schedule(0, playOnce);
+      }
       schedule(10000, playOnce);
 
       // Advance after full minute. The interval and page events make this more reliable on iPad/Safari,
