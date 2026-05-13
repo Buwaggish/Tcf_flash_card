@@ -3,6 +3,8 @@ let currentUrl: string | null = null;
 let currentReject: ((reason?: any) => void) | null = null;
 let audioContext: AudioContext | null = null;
 let currentSource: AudioBufferSourceNode | null = null;
+let keepAliveOscillator: OscillatorNode | null = null;
+let keepAliveGain: GainNode | null = null;
 
 const getAudioElement = () => {
   if (!currentAudio) {
@@ -36,6 +38,19 @@ const getAudioContext = (): AudioContext | null => {
   return audioContext;
 };
 
+const keepAudioContextAlive = (context: AudioContext) => {
+  if (keepAliveOscillator) return;
+
+  keepAliveGain = context.createGain();
+  keepAliveGain.gain.value = 0.00001;
+
+  keepAliveOscillator = context.createOscillator();
+  keepAliveOscillator.frequency.value = 20;
+  keepAliveOscillator.connect(keepAliveGain);
+  keepAliveGain.connect(context.destination);
+  keepAliveOscillator.start();
+};
+
 export const unlockAzureAudioPlayback = async (): Promise<void> => {
   const context = getAudioContext();
   if (!context) return;
@@ -48,6 +63,7 @@ export const unlockAzureAudioPlayback = async (): Promise<void> => {
   source.buffer = context.createBuffer(1, 1, 22050);
   source.connect(context.destination);
   source.start(0);
+  keepAudioContextAlive(context);
 };
 
 export const stopAzureTTS = (options?: { silent?: boolean }) => {
@@ -93,6 +109,7 @@ const playWithAudioContext = async (
   if (context.state === 'suspended') {
     await context.resume();
   }
+  keepAudioContextAlive(context);
 
   stopAzureTTS({ silent: true });
 
