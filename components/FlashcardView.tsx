@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Flashcard, StudyMode } from '../types';
 import { getFrenchVoices, speak, cancelSpeech, speakViaLocalService } from '../services/ttsService';
-import { playAzureTTS, stopAzureTTS } from '../services/azureService';
+import { playAzureTTS, stopAzureTTS, unlockAzureAudioPlayback } from '../services/azureService';
 import { generateCardContext } from '../services/geminiService';
 import { calculateNextReview, getDueDateLabel, isCardDue, getCardStatusLabel, getCardPriority, INITIAL_SRS_DATA } from '../services/srsService';
 import { ConfirmModal } from './ConfirmModal';
@@ -40,6 +40,10 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
   const autoRunActiveRef = useRef(false);
   const autoTimeoutsRef = useRef<number[]>([]);
   const isSequenceMode = studyMode === 'sequence';
+  const isAppleTouchDevice = typeof navigator !== 'undefined' && (
+    /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+  );
 
   // Queue Init
   useEffect(() => {
@@ -93,6 +97,7 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
   const [aiExplanation, setAiExplanation] = useState<string | null>(null);
   const [isGeneratingAi, setIsGeneratingAi] = useState(false);
   const [isClozeMode, setIsClozeMode] = useState(false);
+  const [autoPlaybackStarted, setAutoPlaybackStarted] = useState(false);
   const [clozeInput, setClozeInput] = useState('');
   const clozeIndexMapRef = useRef<Map<string, number>>(new Map());
   const [editingCard, setEditingCard] = useState<Flashcard | null>(null);
@@ -104,6 +109,15 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
       setIsGeneratingAi(false);
       setClozeInput('');
   }, [currentCard]);
+
+  useEffect(() => {
+    if (!autoPreview) {
+      setAutoPlaybackStarted(false);
+      return;
+    }
+
+    setAutoPlaybackStarted(!isAppleTouchDevice);
+  }, [autoPreview, isAppleTouchDevice, unitId]);
 
   useEffect(() => {
     const loadVoices = () => {
@@ -135,6 +149,23 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
       localStorage.setItem('tcf-azure-key', azureKey);
       setShowAzureSettings(false);
       alert("Azure settings saved.");
+  };
+
+  const handleStartAutoPlayback = async (e: React.MouseEvent) => {
+      e.stopPropagation();
+      if (!azureRegion || !azureKey) {
+          setShowVoiceSettings(true);
+          setShowAzureSettings(true);
+          return;
+      }
+
+      try {
+          setIsPlaying(true);
+          await unlockAzureAudioPlayback();
+      } finally {
+          setIsPlaying(false);
+          setAutoPlaybackStarted(true);
+      }
   };
 
   const handleGoogleSave = () => {
@@ -466,6 +497,12 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
 
     if (!currentCard || studyQueue.length === 0) return;
 
+    if (!autoPlaybackStarted) {
+      setIsFlipped(true);
+      autoRunActiveRef.current = false;
+      return;
+    }
+
     if (autoRunActiveRef.current) return;
     autoRunActiveRef.current = true;
 
@@ -588,7 +625,7 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
       stopAzureTTS({ silent: true });
       autoRunActiveRef.current = false;
     };
-  }, [autoPreview, currentCard?.id, azureRegion, azureKey]);
+  }, [autoPreview, autoPlaybackStarted, currentCard?.id, azureRegion, azureKey]);
 
   useEffect(() => {
     if (viewMode !== 'study') return;
@@ -754,8 +791,22 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
       </div>
 
       {autoPreview && (
-         <div className="mb-3 px-4 py-2 bg-cyan-900/40 border border-cyan-500/40 rounded-lg text-sm text-cyan-100">
-            Auto display is running. Each card will cloud-read twice with 10s between, then wait the rest of 1 minute before moving on without changing progress.
+         <div className="mb-3 px-4 py-2 bg-cyan-900/40 border border-cyan-500/40 rounded-lg text-sm text-cyan-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <span>
+              {autoPlaybackStarted
+                ? 'Auto display is running. Each card will cloud-read twice with 10s between, then wait the rest of 1 minute before moving on without changing progress.'
+                : 'Tap Start Auto Pronunciation to allow audio playback on iPhone/iPad.'}
+            </span>
+            {!autoPlaybackStarted && (
+              <button
+                onClick={handleStartAutoPlayback}
+                disabled={isPlaying}
+                className="shrink-0 inline-flex items-center justify-center gap-2 bg-cyan-600 hover:bg-cyan-500 disabled:opacity-60 text-white px-4 py-2 rounded-lg font-semibold transition"
+              >
+                {isPlaying ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
+                Start Auto Pronunciation
+              </button>
+            )}
          </div>
       )}
 
