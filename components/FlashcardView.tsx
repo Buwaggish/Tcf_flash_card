@@ -477,11 +477,19 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
       autoTimerRef.current = null;
     }
 
+    const clearAutoTimers = () => {
+      autoTimeoutsRef.current.forEach(id => {
+        clearTimeout(id);
+        clearInterval(id);
+      });
+      autoTimeoutsRef.current = [];
+    };
+
     // Clear any lingering timers before starting new run
-    autoTimeoutsRef.current.forEach(id => clearTimeout(id));
-    autoTimeoutsRef.current = [];
+    clearAutoTimers();
 
     let cancelled = false;
+    let advanced = false;
 
     const runAutoDisplay = () => {
       setIsFlipped(true); // Keep answer visible while speaking
@@ -504,7 +512,12 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
           setIsPlaying(true);
           cancelSpeech();
           stopAzureTTS({ silent: true });
-          await playAzureTTS(currentCard.back, azureRegion, azureKey);
+          await Promise.race([
+            playAzureTTS(currentCard.back, azureRegion, azureKey),
+            new Promise<void>((_, reject) => {
+              window.setTimeout(() => reject(new Error("Auto playback timed out")), 25000);
+            })
+          ]);
         } catch (err) {
           if ((err as DOMException)?.name !== 'AbortError') {
             console.error("Auto cloud playback error", err);
@@ -514,16 +527,16 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
         }
       };
 
-      // Two plays: immediately and after 10s
-      schedule(0, playOnce);
-      schedule(10000, playOnce);
-
-      // Advance after full minute
-      schedule(60000, () => {
-        if (cancelled || sessionId !== autoSessionRef.current) {
+      const advanceAt = Date.now() + 60000;
+      const advanceIfReady = (force = false) => {
+        if (advanced || cancelled || sessionId !== autoSessionRef.current) {
           autoRunActiveRef.current = false;
           return;
         }
+        if (!force && Date.now() < advanceAt) return;
+
+        advanced = true;
+        clearAutoTimers();
         stopAzureTTS({ silent: true });
         const currentIndex = studyQueue.findIndex(c => c.id === currentCard.id);
         const nextIndex = currentIndex + 1;
@@ -535,17 +548,38 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
           setSessionComplete(true);
         }
         setIsFlipped(false);
+        setIsPlaying(false);
         autoRunActiveRef.current = false;
-      });
+      };
+
+      // Two plays: immediately and after 10s
+      schedule(0, playOnce);
+      schedule(10000, playOnce);
+
+      // Advance after full minute. The interval and page events make this more reliable on iPad/Safari,
+      // where long timers can be delayed when the page is throttled.
+      schedule(60000, () => advanceIfReady(true));
+      const watchdogId = window.setInterval(() => advanceIfReady(), 1000);
+      autoTimeoutsRef.current.push(watchdogId);
+      const handlePageResume = () => advanceIfReady();
+      document.addEventListener('visibilitychange', handlePageResume);
+      window.addEventListener('focus', handlePageResume);
+      window.addEventListener('pageshow', handlePageResume);
+
+      return () => {
+        document.removeEventListener('visibilitychange', handlePageResume);
+        window.removeEventListener('focus', handlePageResume);
+        window.removeEventListener('pageshow', handlePageResume);
+      };
     };
 
-    runAutoDisplay();
+    const cleanupAutoDisplay = runAutoDisplay();
 
     return () => {
       cancelled = true;
       autoSessionRef.current += 1; // invalidate any pending run
-      autoTimeoutsRef.current.forEach(id => clearTimeout(id));
-      autoTimeoutsRef.current = [];
+      cleanupAutoDisplay?.();
+      clearAutoTimers();
       if (autoTimerRef.current) {
         clearTimeout(autoTimerRef.current);
         autoTimerRef.current = null;
