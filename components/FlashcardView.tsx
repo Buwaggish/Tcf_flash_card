@@ -9,6 +9,7 @@ import { ArrowLeft, RefreshCw, Volume2, Play, Pause, Settings, CloudLightning, B
 
 interface FlashcardViewProps {
   cards: Flashcard[];
+  studyCards?: Flashcard[];
   title: string;
   onBack: () => void;
   unitId: string;
@@ -26,7 +27,7 @@ interface FlashcardViewProps {
 }
 
 export const FlashcardView: React.FC<FlashcardViewProps> = ({ 
-  cards, title, onBack, unitId, onUpdateCard, onDeleteCard, onStudyActivity, todayStudyTime = 0, onResetTimer, isTimerPaused = false, isTimerExpanded = false, onToggleTimerPause, onToggleTimerExpanded, autoPreview = false, studyMode = 'srs'
+  cards, studyCards, title, onBack, unitId, onUpdateCard, onDeleteCard, onStudyActivity, todayStudyTime = 0, onResetTimer, isTimerPaused = false, isTimerExpanded = false, onToggleTimerPause, onToggleTimerExpanded, autoPreview = false, studyMode = 'srs'
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [viewMode, setViewMode] = useState<'study' | 'gallery'>('study');
@@ -48,7 +49,8 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
 
   // Queue Init
   useEffect(() => {
-    const filtered = cards.filter(card => !excludedIds.has(card.id));
+    const queueCards = studyCards ?? cards;
+    const filtered = queueCards.filter(card => !excludedIds.has(card.id));
     const sorted = isSequenceMode ? [...filtered] : [...filtered].sort((a, b) => {
       const pA = getCardPriority(a);
       const pB = getCardPriority(b);
@@ -61,19 +63,16 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
     setStudyQueue(sorted);
     
     if (sorted.length > 0) {
-      if (!currentCard) {
-          setCurrentCard(sorted[0]);
-      } else {
-          // Sync existing card if present
-          const exists = sorted.find(c => c.id === currentCard.id);
-          if (!exists) setCurrentCard(sorted[0]);
-      }
+      setCurrentCard(previous => {
+        if (!previous) return sorted[0];
+        return sorted.find(c => c.id === previous.id) || sorted[0];
+      });
       setSessionComplete(false);
     } else {
       setSessionComplete(true);
       setCurrentCard(null);
     }
-  }, [cards, excludedIds, isSequenceMode]); 
+  }, [cards, studyCards, excludedIds, isSequenceMode]); 
 
   useEffect(() => {
     setExcludedIds(new Set());
@@ -329,6 +328,14 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
     if (!currentCard) return;
     onStudyActivity?.();
     const newSRS = calculateNextReview(currentCard.srs, grade);
+    const isRequeue = !studyCards && newSRS.interval === 0;
+    if (!isRequeue) {
+      setExcludedIds(prev => {
+        const next = new Set(prev);
+        next.add(currentCard.id);
+        return next;
+      });
+    }
     onUpdateCard(currentCard.id, { srs: newSRS });
     cancelSpeech();
     setIsFlipped(false);
@@ -336,7 +343,6 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
       const currentIndex = studyQueue.findIndex(c => c.id === currentCard.id);
       if (currentIndex !== -1) {
           const nextQueue = [...studyQueue];
-          const isRequeue = newSRS.interval === 0;
           if (isRequeue) {
               nextQueue[currentIndex] = { ...nextQueue[currentIndex], srs: newSRS };
               const [cardToRequeue] = nextQueue.splice(currentIndex, 1);
@@ -434,7 +440,13 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
 
   const handleEditSave = () => {
     if (!editingCard) return;
-    onUpdateCard(editingCard.id, { front: editFront.trim(), back: editBack.trim() });
+    const updates = { front: editFront.trim(), back: editBack.trim() };
+    onUpdateCard(editingCard.id, updates);
+    setStudyQueue(prev => prev.map(card => card.id === editingCard.id ? { ...card, ...updates } : card));
+    setCurrentCard(prev => prev?.id === editingCard.id ? { ...prev, ...updates } : prev);
+    clozeIndexMapRef.current.delete(editingCard.id);
+    setClozeInput('');
+    setAiExplanation(null);
     setEditingCard(null);
   };
 
@@ -702,6 +714,7 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
   const isFrenchLong = currentCard ? currentCard.back.split(' ').length > 4 : false;
   const isDue = currentCard ? isCardDue(currentCard) : false;
   const queueBadgeLabel = isSequenceMode ? `${studyQueue.length} Steps` : `${studyQueue.length} Queue`;
+  const canEditCurrentCard = !isSequenceMode && !!currentCard;
   const nextAgain = currentCard ? calculateNextReview(currentCard.srs, 'again') : null;
   const nextHard = currentCard ? calculateNextReview(currentCard.srs, 'hard') : null;
   const nextGood = currentCard ? calculateNextReview(currentCard.srs, 'good') : null;
@@ -956,12 +969,30 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
                     <div className={`relative w-full max-w-3xl transition-all duration-500 transform-style-3d cursor-pointer group min-h-[60vh] md:min-h-[70vh] ${isFlipped ? 'rotate-y-180' : ''}`} onClick={() => setIsFlipped(prev => !prev)}>
                     {/* Front */}
                     <div className="absolute inset-0 backface-hidden bg-slate-800 border-2 border-slate-700 rounded-2xl shadow-2xl flex flex-col items-center justify-center p-8 group-hover:border-indigo-500/50 transition">
+                        {canEditCurrentCard && (
+                          <button
+                            onClick={(e) => handleEditOpen(currentCard, e)}
+                            className="absolute top-4 right-4 p-2 text-slate-400 hover:text-indigo-200 hover:bg-slate-700 rounded-full transition"
+                            title="Edit card"
+                          >
+                            <Edit2 className="w-4 h-4" />
+                          </button>
+                        )}
                         <span className="text-xs font-bold text-indigo-400 uppercase tracking-widest mb-4">{isSequenceMode ? `Sentence ${currentSequenceIndex + 1} of ${studyQueue.length}` : 'Question'}</span>
                         <p className="text-2xl md:text-3xl text-center font-medium text-slate-100 leading-relaxed">{currentCard.front}</p>
                         <p className="mt-auto md:mt-8 text-sm text-slate-500 animate-pulse pt-4">Tap to reveal answer</p>
                     </div>
                     {/* Back */}
                     <div className="absolute inset-0 backface-hidden rotate-y-180 bg-indigo-900/20 border-2 border-indigo-500/30 rounded-2xl shadow-2xl flex flex-col items-center justify-center p-8 backdrop-blur-sm">
+                        {canEditCurrentCard && (
+                          <button
+                            onClick={(e) => handleEditOpen(currentCard, e)}
+                            className="absolute top-4 right-4 z-10 p-2 text-slate-300 hover:text-indigo-100 hover:bg-indigo-500/20 rounded-full transition"
+                            title="Edit card"
+                          >
+                            <Edit2 className="w-4 h-4" />
+                          </button>
+                        )}
                         <div className="w-full h-full flex flex-col">
                             {aiExplanation && (
                                 <div className="bg-slate-900/95 p-4 rounded-xl border border-indigo-500/30 text-left animate-in slide-in-from-top-2" onClick={e => e.stopPropagation()}>

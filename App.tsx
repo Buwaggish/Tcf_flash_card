@@ -918,6 +918,7 @@ export default function App() {
 
   const renderStudy = () => {
     let cardsToStudy: Flashcard[] = [];
+    let studyQueueCards: Flashcard[] | undefined;
     let title = "";
     let unitIdForProgress = "";
 
@@ -930,6 +931,7 @@ export default function App() {
                 }
             });
         }));
+        studyQueueCards = cardsToStudy;
         title = "Review All Due Cards";
         unitIdForProgress = "review-all-session";
     } else if (viewState === ViewState.AUTO_PREVIEW) {
@@ -937,6 +939,7 @@ export default function App() {
         const unit = category?.units.find(u => u.id === selectedUnit);
         if (category && unit) {
             cardsToStudy = unit.cards.filter(isCardDue);
+            studyQueueCards = cardsToStudy;
             title = `${category.name} - ${unit.name} (Auto Display)`;
             unitIdForProgress = unit.id;
         } else {
@@ -952,6 +955,7 @@ export default function App() {
         const unit = category?.units.find(u => u.id === selectedUnit);
         if (category && unit) {
             cardsToStudy = unit.cards;
+            studyQueueCards = unit.cards.filter(isCardDue);
             title = `${category.name} - ${unit.name}`;
             unitIdForProgress = unit.id;
         } else {
@@ -999,6 +1003,7 @@ export default function App() {
     return (
       <FlashcardView 
         cards={cardsToStudy} 
+        studyCards={studyQueueCards}
         title={title}
         onBack={() => setViewState(ViewState.HOME)}
         unitId={unitIdForProgress}
