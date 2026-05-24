@@ -76,6 +76,7 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
 
   useEffect(() => {
     setExcludedIds(new Set());
+    setPronunciationCounts({});
   }, [unitId, studyMode]);
 
   useEffect(() => {
@@ -86,6 +87,7 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
 
   const [isFlipped, setIsFlipped] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [pronunciationCounts, setPronunciationCounts] = useState<Record<string, number>>({});
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [selectedVoiceName, setSelectedVoiceName] = useState<string>('');
   const [showVoiceSettings, setShowVoiceSettings] = useState(false);
@@ -185,6 +187,7 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
               window.setTimeout(() => reject(new Error("Auto playback start timed out")), 25000);
             })
           ]);
+          markPronounced(currentCard.id);
           autoStartedCardIdRef.current = currentCard.id;
           setAutoPlaybackStarted(true);
       } catch (err) {
@@ -206,21 +209,29 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
     return voices.find(v => v.name === selectedVoiceName) || null;
   }, [voices, selectedVoiceName]);
 
-  const handlePlayAudio = useCallback(async (text: string, e?: React.MouseEvent) => {
+  const markPronounced = useCallback((cardId: string) => {
+    setPronunciationCounts(prev => ({
+      ...prev,
+      [cardId]: (prev[cardId] || 0) + 1
+    }));
+  }, []);
+
+  const handlePlayAudio = useCallback(async (text: string, e?: React.MouseEvent, cardId?: string) => {
     e?.stopPropagation();
     if (isPlaying) return;
     try {
       setIsPlaying(true);
       cancelSpeech();
       await speak(text, getSelectedVoice());
+      if (cardId) markPronounced(cardId);
     } catch (err) {
       console.error("Playback error", err);
     } finally {
       setIsPlaying(false);
     }
-  }, [isPlaying, getSelectedVoice]);
+  }, [isPlaying, getSelectedVoice, markPronounced]);
 
-  const handleCloudPlay = useCallback(async (text: string, e?: React.MouseEvent) => {
+  const handleCloudPlay = useCallback(async (text: string, e?: React.MouseEvent, cardId?: string) => {
       e?.stopPropagation();
       if (isPlaying) return;
       if (!azureRegion || !azureKey) {
@@ -232,13 +243,14 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
           setIsPlaying(true);
           cancelSpeech();
           await playAzureTTS(text, azureRegion, azureKey);
+          if (cardId) markPronounced(cardId);
       } catch (err) {
           console.error("Cloud playback error", err);
           alert("Azure TTS failed. Check Console or Keys.");
       } finally {
           setIsPlaying(false);
       }
-  }, [isPlaying, azureRegion, azureKey]);
+  }, [isPlaying, azureRegion, azureKey, markPronounced]);
 
   const handleListPlayAudio = useCallback(async (text: string, e?: React.MouseEvent) => {
       e?.stopPropagation();
@@ -266,7 +278,7 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
       }
   }, [isPlaying, azureRegion, azureKey, getSelectedVoice]);
 
-  const handleLocalProxyPlay = useCallback(async (text: string, e?: React.MouseEvent) => {
+  const handleLocalProxyPlay = useCallback(async (text: string, e?: React.MouseEvent, cardId?: string) => {
       e?.stopPropagation();
       if (isPlaying) return;
       try {
@@ -274,15 +286,16 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
           cancelSpeech();
           stopAzureTTS({ silent: true });
           await speakViaLocalService(text);
+          if (cardId) markPronounced(cardId);
       } catch (err) {
           console.error("Local proxy playback error", err);
           alert("Local TTS failed. Check the Siri proxy service.");
       } finally {
           setIsPlaying(false);
       }
-  }, [isPlaying]);
+  }, [isPlaying, markPronounced]);
 
-  const handlePlaySequence = async (text: string, e?: React.MouseEvent) => {
+  const handlePlaySequence = async (text: string, e?: React.MouseEvent, cardId?: string) => {
     e?.stopPropagation();
     if (isPlaying) return;
     const words = text.split(' ');
@@ -294,6 +307,7 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
         await speak(word, voice, 0.9);
         await new Promise(r => setTimeout(r, 200)); 
       }
+      if (cardId) markPronounced(cardId);
     } catch (err) {
       console.error("Sequence playback error", err);
     } finally {
@@ -596,6 +610,7 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
               window.setTimeout(() => reject(new Error("Auto playback timed out")), 25000);
             })
           ]);
+          markPronounced(currentCard.id);
         } catch (err) {
           if ((err as DOMException)?.name !== 'AbortError') {
             console.error("Auto cloud playback error", err);
@@ -672,7 +687,7 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
       stopAzureTTS({ silent: true });
       autoRunActiveRef.current = false;
     };
-  }, [autoPreview, autoPlaybackStarted, currentCard?.id, azureRegion, azureKey]);
+  }, [autoPreview, autoPlaybackStarted, currentCard?.id, azureRegion, azureKey, markPronounced]);
 
   useEffect(() => {
     if (viewMode !== 'study') return;
@@ -683,13 +698,13 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
           setIsFlipped(p => !p);
       } 
       else if (e.key.toLowerCase() === 'p') {
-          currentCard && handlePlayAudio(currentCard.back);
+          currentCard && handlePlayAudio(currentCard.back, undefined, currentCard.id);
       }
       else if (e.key.toLowerCase() === 'o') {
-          currentCard && handleCloudPlay(currentCard.back);
+          currentCard && handleCloudPlay(currentCard.back, undefined, currentCard.id);
       }
       else if (e.key.toLowerCase() === 'i') {
-          currentCard && handleLocalProxyPlay(currentCard.back);
+          currentCard && handleLocalProxyPlay(currentCard.back, undefined, currentCard.id);
       }
       else if (isSequenceMode) {
           if ((e.key === 'ArrowLeft' || e.key.toLowerCase() === 'b') && (isFlipped || sessionComplete)) {
@@ -715,6 +730,7 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
   const isDue = currentCard ? isCardDue(currentCard) : false;
   const queueBadgeLabel = isSequenceMode ? `${studyQueue.length} Steps` : `${studyQueue.length} Queue`;
   const canEditCurrentCard = !isSequenceMode && !!currentCard;
+  const currentPronunciationCount = currentCard ? pronunciationCounts[currentCard.id] || 0 : 0;
   const nextAgain = currentCard ? calculateNextReview(currentCard.srs, 'again') : null;
   const nextHard = currentCard ? calculateNextReview(currentCard.srs, 'hard') : null;
   const nextGood = currentCard ? calculateNextReview(currentCard.srs, 'good') : null;
@@ -979,6 +995,17 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
                           </button>
                         )}
                         <span className="text-xs font-bold text-indigo-400 uppercase tracking-widest mb-4">{isSequenceMode ? `Sentence ${currentSequenceIndex + 1} of ${studyQueue.length}` : 'Question'}</span>
+                        <span
+                          className={`mb-4 inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
+                            currentPronunciationCount > 0
+                              ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
+                              : 'border-slate-600 bg-slate-900/70 text-slate-400'
+                          }`}
+                          title="Pronunciations for this card in the current study session only"
+                        >
+                          <Volume2 className="w-3 h-3" />
+                          {currentPronunciationCount > 0 ? `Pronounced ${currentPronunciationCount}x` : 'Not pronounced'}
+                        </span>
                         <p className="text-2xl md:text-3xl text-center font-medium text-slate-100 leading-relaxed">{currentCard.front}</p>
                         <p className="mt-auto md:mt-8 text-sm text-slate-500 animate-pulse pt-4">Tap to reveal answer</p>
                     </div>
@@ -1001,7 +1028,20 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
                                 </div>
                             )}
                             <div className={`flex-1 w-full flex flex-col items-center ${aiExplanation ? 'mt-4' : ''}`}>
-                                <span className="text-xs font-bold text-indigo-400 uppercase tracking-widest mb-4">{isSequenceMode ? `Check Sentence ${currentSequenceIndex + 1}` : 'Réponse'}</span>
+                                <div className="flex flex-wrap items-center justify-center gap-2 mb-4">
+                                  <span className="text-xs font-bold text-indigo-400 uppercase tracking-widest">{isSequenceMode ? `Check Sentence ${currentSequenceIndex + 1}` : 'Réponse'}</span>
+                                  <span
+                                    className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
+                                      currentPronunciationCount > 0
+                                        ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
+                                        : 'border-slate-600 bg-slate-900/70 text-slate-400'
+                                    }`}
+                                    title="Pronunciations for this card in the current study session only"
+                                  >
+                                    <Volume2 className="w-3 h-3" />
+                                    {currentPronunciationCount > 0 ? `Pronounced ${currentPronunciationCount}x` : 'Not pronounced'}
+                                  </span>
+                                </div>
                                 {isClozeMode ? (() => {
                                   const words = currentCard.back.split(' ').filter(Boolean);
                                   const clozeIndex = getClozeIndex(currentCard.id, words);
@@ -1036,11 +1076,11 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
                                 )}
                                 
                                 <div className="mt-auto flex flex-wrap justify-center gap-3 pt-4 border-t border-white/10 w-full" onClick={(e) => e.stopPropagation()}>
-                                <button onClick={(e) => handlePlayAudio(currentCard.back, e)} disabled={isPlaying} title="Play Local (P)" className="p-3 bg-indigo-600 hover:bg-indigo-500 rounded-full text-white shadow-lg">{isPlaying && !isFrenchLong ? <RefreshCw className="w-5 h-5 animate-spin" /> : <Volume2 className="w-5 h-5" />}</button>
-                                <button onClick={(e) => handleCloudPlay(currentCard.back, e)} disabled={isPlaying || !azureKey} title="Play Cloud (O)" className={`p-3 rounded-full shadow-lg ${azureKey ? 'bg-cyan-600 hover:bg-cyan-500 text-white' : 'bg-slate-700 text-slate-400'}`}>{isPlaying ? <RefreshCw className="w-5 h-5 animate-spin" /> : <CloudLightning className="w-5 h-5" />}</button>
-                                <button onClick={(e) => handleLocalProxyPlay(currentCard.back, e)} disabled={isPlaying} title="Play Siri Proxy (I)" className="p-3 rounded-full shadow-lg bg-emerald-600 hover:bg-emerald-500 text-white">{isPlaying ? <RefreshCw className="w-5 h-5 animate-spin" /> : <Mic className="w-5 h-5" />}</button>
+                                <button onClick={(e) => handlePlayAudio(currentCard.back, e, currentCard.id)} disabled={isPlaying} title="Play Local (P)" className="p-3 bg-indigo-600 hover:bg-indigo-500 rounded-full text-white shadow-lg">{isPlaying && !isFrenchLong ? <RefreshCw className="w-5 h-5 animate-spin" /> : <Volume2 className="w-5 h-5" />}</button>
+                                <button onClick={(e) => handleCloudPlay(currentCard.back, e, currentCard.id)} disabled={isPlaying || !azureKey} title="Play Cloud (O)" className={`p-3 rounded-full shadow-lg ${azureKey ? 'bg-cyan-600 hover:bg-cyan-500 text-white' : 'bg-slate-700 text-slate-400'}`}>{isPlaying ? <RefreshCw className="w-5 h-5 animate-spin" /> : <CloudLightning className="w-5 h-5" />}</button>
+                                <button onClick={(e) => handleLocalProxyPlay(currentCard.back, e, currentCard.id)} disabled={isPlaying} title="Play Siri Proxy (I)" className="p-3 rounded-full shadow-lg bg-emerald-600 hover:bg-emerald-500 text-white">{isPlaying ? <RefreshCw className="w-5 h-5 animate-spin" /> : <Mic className="w-5 h-5" />}</button>
                                 <button onClick={handleAiExplain} disabled={isGeneratingAi} className={`p-3 rounded-full shadow-lg transition ${isGeneratingAi ? 'bg-slate-600' : 'bg-violet-600 hover:bg-violet-500'} text-white`} title="Explain with AI">{isGeneratingAi ? <Loader2 className="w-5 h-5 animate-spin" /> : <Sparkles className="w-5 h-5" />}</button>
-                                {isFrenchLong && <button onClick={(e) => handlePlaySequence(currentCard.back, e)} disabled={isPlaying} className="p-3 bg-slate-700 hover:bg-slate-600 rounded-full text-white shadow-lg" title="Slow Mode"><Play className="w-5 h-5" /></button>}
+                                {isFrenchLong && <button onClick={(e) => handlePlaySequence(currentCard.back, e, currentCard.id)} disabled={isPlaying} className="p-3 bg-slate-700 hover:bg-slate-600 rounded-full text-white shadow-lg" title="Slow Mode"><Play className="w-5 h-5" /></button>}
                                 {!autoPreview && !isSequenceMode && (
                                   <div className="w-full flex justify-center gap-4 mt-2 border-t border-white/10 pt-2">
                                       <button onClick={handleSnooze} className="text-slate-400 hover:text-indigo-300 text-xs flex items-center gap-1"><Moon className="w-3 h-3" /> Snooze 30d</button>
