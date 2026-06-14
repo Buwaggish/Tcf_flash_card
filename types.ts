@@ -46,7 +46,6 @@ export interface LongArticle {
 
 export enum ViewState {
   HOME = 'HOME',
-  CATEGORY = 'CATEGORY',
   STUDY = 'STUDY',
   STUDY_ALL = 'STUDY_ALL',
   AUTO_PREVIEW = 'AUTO_PREVIEW',

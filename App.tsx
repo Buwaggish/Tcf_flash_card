@@ -7,43 +7,20 @@ import { LongArticleView } from './components/LongArticleView';
 import { SyncModal } from './components/SyncModal';
 import { ConfirmModal } from './components/ConfirmModal';
 import { Plus, BookOpen, ChevronRight, Layers, Trash2, Cloud, Loader2, CheckCircle, CloudOff, Brain, Download, Bell, BellOff, Flame, Play, Pause, Maximize2, Minimize2, Clock, FileText, Edit2 } from 'lucide-react';
-import { initSupabase, syncData, pullData, pushData, consolidateData, saveStudyLog, fetchTodayStudyLog, fetchLongArticles, upsertLongArticle, upsertLongArticles, deleteLongArticle } from './services/syncService';
+import { initSupabase, syncData, pullData, pushData, consolidateData, fetchLongArticles, upsertLongArticle, upsertLongArticles, deleteLongArticle } from './services/syncService';
 import { isCardDue } from './services/srsService';
-import { splitIntoSentences } from './services/textSegmentation';
+import { buildArticleSequenceCards, mergeLongArticles } from './services/articleService';
+import { formatTime } from './utils/time';
+import { useStudyTimer } from './hooks/useStudyTimer';
 
 // Simple UUID generator
 const generateId = () => Math.random().toString(36).substr(2, 9) + '-' + Date.now().toString(36);
 
-const mergeLongArticles = (base: LongArticle[], incoming: LongArticle[]) => {
-  const map = new Map<string, LongArticle>();
-  base.forEach(article => map.set(article.id, article));
-  incoming.forEach(article => {
-    const existing = map.get(article.id);
-    if (!existing || (article.updatedAt || 0) >= (existing.updatedAt || 0)) {
-      map.set(article.id, article);
-    }
-  });
-  return Array.from(map.values()).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
-};
-
-const buildArticleSequenceCards = (article: LongArticle): Flashcard[] => {
-  const sentences = splitIntoSentences(article.content);
-
-  return sentences.map((sentence, index) => {
-    const isFirst = index === 0;
-    const previousSentence = sentences[index - 1];
-    const prompt = isFirst
-      ? `Opening sentence\n\nStart your response for "${article.title}". What is the first sentence?`
-      : `Sentence ${index + 1} of ${sentences.length}\n\nPrevious sentence:\n${previousSentence}\n\nWhat comes next?`;
-
-    return {
-      id: `article-sequence-${article.id}-${String(index + 1).padStart(4, '0')}`,
-      front: prompt,
-      back: sentence,
-      mastered: false
-    };
-  });
-};
+type ConfirmState =
+  | { type: 'resetTimer' }
+  | { type: 'deleteUnit'; catIdx: number; unitIdx: number; unitName: string }
+  | { type: 'fixDuplicates' }
+  | { type: 'deleteArticle'; articleId: string; title: string };
 
 export default function App() {
   const [data, setData] = useState<AppData>([]);
@@ -69,133 +46,19 @@ export default function App() {
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const [lastNotificationTime, setLastNotificationTime] = useState(0);
 
-  // Streak & Timer
-  const [streak, setStreak] = useState(0);
-  const [todayStudyTime, setTodayStudyTime] = useState(0); // seconds
-  const [isTimerPaused, setIsTimerPaused] = useState(false);
-  const [isTimerExpanded, setIsTimerExpanded] = useState(false);
-  type ConfirmState = 
-    | { type: 'resetTimer' }
-    | { type: 'deleteUnit'; catIdx: number; unitIdx: number; unitName: string }
-    | { type: 'fixDuplicates' }
-    | { type: 'deleteArticle'; articleId: string; title: string };
   const [confirmState, setConfirmState] = useState<ConfirmState | null>(null);
 
-  // --- TIMER LOGIC ---
-  useEffect(() => {
-      const today = new Date().toDateString();
-      const savedDate = localStorage.getItem('tcf-study-date');
-      let initialTime = 0;
-
-      if (savedDate === today) {
-          initialTime = parseInt(localStorage.getItem('tcf-study-time') || '0', 10);
-      } else {
-          localStorage.setItem('tcf-study-date', today);
-          localStorage.setItem('tcf-study-time', '0');
-      }
-      setTodayStudyTime(initialTime);
-  }, []);
-
-  useEffect(() => {
-      const interval = setInterval(() => {
-          if (document.visibilityState === 'visible' && !isTimerPaused) {
-              setTodayStudyTime(prev => {
-                  const newVal = prev + 1;
-                  if (newVal % 10 === 0) { 
-                      localStorage.setItem('tcf-study-time', newVal.toString());
-                  }
-                  if (newVal % 60 === 0) { 
-                      const dateKey = new Date().toISOString().split('T')[0];
-                      saveStudyLog(dateKey, newVal);
-                  }
-                  return newVal;
-              });
-          }
-      }, 1000);
-
-      return () => clearInterval(interval);
-  }, [isTimerPaused]);
-
-  // Fetch Cloud Timer on Connect
-  useEffect(() => {
-      if (isConnected) {
-          const dateKey = new Date().toISOString().split('T')[0];
-          fetchTodayStudyLog(dateKey).then(cloudTime => {
-              setTodayStudyTime(prev => {
-                  const maxTime = Math.max(prev, cloudTime);
-                  if (maxTime > prev) {
-                      localStorage.setItem('tcf-study-time', maxTime.toString());
-                  }
-                  return maxTime;
-              });
-          });
-      }
-  }, [isConnected]);
-
-  const performResetTimer = () => {
-      setTodayStudyTime(0);
-      localStorage.setItem('tcf-study-time', '0');
-      const dateKey = new Date().toISOString().split('T')[0];
-      saveStudyLog(dateKey, 0);
-  };
+  const { todayStudyTime, isTimerPaused, isTimerExpanded, streak, toggleTimerPause, toggleTimerExpanded, performResetTimer, handleStudyActivity } = useStudyTimer(isConnected);
 
   const handleResetTimer = () => {
       setConfirmState({ type: 'resetTimer' });
   };
 
-  const formatTime = (seconds: number, showSeconds = false) => {
-      const h = Math.floor(seconds / 3600);
-      const m = Math.floor((seconds % 3600) / 60);
-      const s = seconds % 60;
-      if (showSeconds) {
-          if (h > 0) return `${h}h ${m}m ${s}s`;
-          return `${m}m ${s}s`;
-      }
-      if (h > 0) return `${h}h ${m}m`;
-      return `${m}m`;
-  };
-
-  const toggleTimerPause = () => setIsTimerPaused(prev => !prev);
-  const toggleTimerExpanded = () => setIsTimerExpanded(prev => !prev);
-
   useEffect(() => {
     if ('Notification' in window && Notification.permission === 'granted') {
       setNotificationsEnabled(true);
     }
-    const savedStreak = parseInt(localStorage.getItem('tcf-streak') || '0', 10);
-    const lastDate = localStorage.getItem('tcf-last-study-date');
-    
-    if (lastDate) {
-        const today = new Date().toDateString();
-        const yesterday = new Date(Date.now() - 86400000).toDateString();
-        if (lastDate === today || lastDate === yesterday) {
-            setStreak(savedStreak);
-        } else {
-            setStreak(0);
-            localStorage.setItem('tcf-streak', '0');
-        }
-    } else {
-        setStreak(0);
-    }
   }, []);
-
-  const handleStudyActivity = () => {
-      const today = new Date().toDateString();
-      const lastDate = localStorage.getItem('tcf-last-study-date');
-
-      if (lastDate !== today) {
-          let newStreak = 1;
-          const yesterday = new Date(Date.now() - 86400000).toDateString();
-          if (lastDate === yesterday) {
-              const current = parseInt(localStorage.getItem('tcf-streak') || '0', 10);
-              newStreak = current + 1;
-          }
-          
-          setStreak(newStreak);
-          localStorage.setItem('tcf-streak', newStreak.toString());
-          localStorage.setItem('tcf-last-study-date', today);
-      }
-  };
 
   const handleNotificationToggle = async () => {
     if (!('Notification' in window)) {
@@ -357,23 +220,24 @@ export default function App() {
     }
   };
 
-  const autoConnectAndSync = async (newData: AppData) => {
-    if (isConnected) {
-      await runCloudSave(newData);
-      return;
-    }
-
+  const ensureConnected = (): boolean => {
+    if (isConnected) return true;
     const savedConfig = localStorage.getItem('tcf-supabase-config');
-    if (!savedConfig) return;
-
+    if (!savedConfig) return false;
     try {
       const { url, key } = JSON.parse(savedConfig);
-      if (!initSupabase({ url, key })) return;
+      if (!initSupabase({ url, key })) return false;
       setIsConnected(true);
-      await runCloudSave(newData);
+      return true;
     } catch (e) {
-      console.error("Auto-connect sync error", e);
+      console.error("Auto-connect error", e);
+      return false;
     }
+  };
+
+  const autoConnectAndSync = async (newData: AppData) => {
+    if (!ensureConnected()) return;
+    await runCloudSave(newData);
   };
 
   const reconcileLongArticlesWithCloud = async () => {
@@ -403,26 +267,13 @@ export default function App() {
   };
 
   const autoConnectAndSaveLongArticle = async (article: LongArticle) => {
-    if (isConnected) {
-      try {
-        await upsertLongArticle(article);
-      } catch (e) {
-        console.error("Cloud save long article error:", e);
-      }
-      return;
-    }
-
-    const savedConfig = localStorage.getItem('tcf-supabase-config');
-    if (!savedConfig) return;
-
+    const wasConnected = isConnected;
+    if (!ensureConnected()) return;
     try {
-      const { url, key } = JSON.parse(savedConfig);
-      if (!initSupabase({ url, key })) return;
-      setIsConnected(true);
       await upsertLongArticle(article);
-      reconcileLongArticlesWithCloud();
+      if (!wasConnected) reconcileLongArticlesWithCloud();
     } catch (e) {
-      console.error("Auto-connect long article error", e);
+      console.error("Cloud save long article error:", e);
     }
   };
 

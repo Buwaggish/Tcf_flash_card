@@ -6,6 +6,7 @@ import { generateCardContext } from '../services/geminiService';
 import { calculateNextReview, getDueDateLabel, isCardDue, getCardStatusLabel, getCardPriority, INITIAL_SRS_DATA } from '../services/srsService';
 import { ConfirmModal } from './ConfirmModal';
 import { ArrowLeft, RefreshCw, Volume2, Play, Pause, Settings, CloudLightning, Brain, CheckCircle, List, Layers, Sparkles, Loader2, Save, Key, Clock, RotateCcw, Trash2, Moon, Maximize2, Minimize2, Mic, Edit2, X, SkipBack, SkipForward } from 'lucide-react';
+import { formatTime } from '../utils/time';
 
 interface FlashcardViewProps {
   cards: Flashcard[];
@@ -469,17 +470,6 @@ export const FlashcardView: React.FC<FlashcardViewProps> = ({
     e.preventDefault();
     (e.target as HTMLInputElement).blur();
     containerRef.current?.focus();
-  };
-
-  const formatTime = (seconds: number, showSeconds = false) => {
-      const h = Math.floor(seconds / 3600);
-      const m = Math.floor((seconds % 3600) / 60);
-      const s = seconds % 60;
-      if (showSeconds) {
-          if (h > 0) return `${h}h ${m}m ${s}s`;
-          return `${m}m ${s}s`;
-      }
-      return h > 0 ? `${h}h ${m}m` : `${m}m`;
   };
 
   const handleResetTimerClick = (e: React.MouseEvent) => {
