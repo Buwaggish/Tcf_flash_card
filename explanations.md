@@ -238,13 +238,34 @@ Files:
 - `generateCardContext`: short French explanation + example + Chinese translation.
 - `generateSpeech`: Gemini TTS path returning an `AudioBuffer`.
 
-## What To Say About This Project
+## Suggestions
 
-Strong summary:
+These are concrete improvements that fit the current architecture without adding unnecessary complexity.
 
-> "The app is structured around a clear data model, a pure scheduling service, a top-level React coordinator, and small external-service adapters. It is local-first, with optional cloud sync and optional AI/TTS services."
+### 1. Add cards from the UI
 
-Good limitation:
+Right now `handleImport` in `App.tsx` only accepts JSON files. A simple inline form inside a unit (front + back text fields and a submit button) would make it much easier to add individual cards during a study session. The `handleImport` function already handles deduplication and cloud sync, so the new form just needs to call it with a single-item array.
 
-> "It is a personal app, so the direct Supabase client is acceptable for me. In production I would add a backend API, proper auth rules, unit tests for `srsService`, and better conflict metadata per card."
+### 2. localStorage key constants
 
+String keys like `'tcf-cards-data'`, `'tcf-study-time'`, `'tcf-azure-key'`, etc. appear as literals in both `App.tsx` and `FlashcardView.tsx`. A small `constants/storageKeys.ts` file prevents silent typos and makes it easy to find all persisted keys in one place.
+
+### 3. Session summary at end of review
+
+When `sessionComplete` becomes true in `FlashcardView.tsx`, the screen only shows "You're all caught up." Since `handleRate` already knows every grade given, the component could accumulate counts (`again`, `hard`, `good`, `easy`) during the session and display a simple breakdown on the completion screen. No new data needs to be stored.
+
+### 4. Unit rename
+
+Units can be deleted (`handleDeleteUnit`) but not renamed. Adding an edit icon next to the delete button in the home unit list, with an inline input and the same cloud-save path as `handleUpdateCard`, would complete the CRUD surface for units.
+
+### 5. Article metadata in the list
+
+`splitIntoSentences` is already imported in `services/articleService.ts`. The long article list in `renderHome` could call it to show a sentence count (e.g. "24 sentences") next to each article title, giving a quick sense of difficulty before opening the sequence flashcards.
+
+### 6. Keyboard shortcut help overlay
+
+The study view has several shortcuts (Space/Enter to flip, P/O/I to play audio, Q–R or 1–4 to rate, arrow keys in sequence mode) but they are not discoverable. A small `?` button in the `FlashcardView` header that toggles a modal listing the shortcuts would help new users without changing any existing behavior.
+
+### 7. Import validation feedback
+
+`handleImport` silently skips duplicate cards. If the imported file contains 50 items but 30 already exist, the user sees nothing. Returning the count of skipped vs added items from the import handler and surfacing it as a brief toast or alert in `ImportModal` would make the import flow much clearer.
